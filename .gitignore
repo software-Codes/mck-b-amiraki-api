@@ -1,0 +1,90 @@
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# dotenv environment files
+.env
+.env.*.local
+
+# Docker-related files
+docker-compose.override.yml
+docker/*.env
+docker/nginx/*.conf
+
+# Test coverage reports
+coverage/
+*.lcov
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+*.pid
+*.seed
+*.pid.lock
+
+# Editor-specific files
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+*.swp
+*.swo
+*.bak
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build and production files
+dist/
+build/
+out/
+public/
+
+# Jest and testing-related
+jest-html-reporters-*.html
+.cache/
+test-results/
+.jest/
+
+# Git and version control
+!.gitignore
+!.gitattributes
+
+# Compiled files
+*.tsbuildinfo
+*.d.ts
+*.js.map
+*.css.map
+
+# Kubernetes and deployment-specific
+kubernetes/secrets.yaml
+*.crt
+*.key
+
+# Debugging tools
+*.log
+debug/
+
+# Miscellaneous
+*.log.*
+*.bak
+*.swp
+
+# Ignore local README drafts
+docs/README_LOCAL.md
+
+# Ignore temporary backups
+**/*~
+
+# Ignore package-lock files if you're using Yarn (optional)
+package-lock.json
