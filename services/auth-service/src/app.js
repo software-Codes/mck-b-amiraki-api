@@ -4,6 +4,7 @@ const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const { initializeDatabaseTables, sql } = require("./config/database");
+const router = require('./routes/authRoutes');
 
 
 const createApp = () => {
@@ -117,6 +118,9 @@ const createApp = () => {
     setupTestRoutes();
     return app;
   };
+
+  //use routes
+  app.use('/api/auth', router);
 
   return {
     app,

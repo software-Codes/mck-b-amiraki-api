@@ -7,4 +7,4 @@ const imagekit = new ImageKit({
 });
 
 
-module.exports = Imagekit;
+module.exports = imagekit;
