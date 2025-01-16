@@ -1,15 +1,13 @@
 // Initialize database tables and types
 
-import dotenv from 'dotenv';
-import { neon } from '@neondatabase/serverless';
-import { v4 as uuidv4 } from 'uuid';
-
+const dotenv = require('dotenv')
+const {neon} = require ('@neondatabase/serverless')
 // Load environment variables
 dotenv.config();
 
- export  const sql = neon(process.env.DATABASE_URL);
+   const sql = neon(process.env.DATABASE_URL);
 
- export  const createUsersTable = async () => {
+   const createUsersTable = async () => {
     try {
         // Create ENUM types if they don't exist
         await sql`
@@ -55,54 +53,57 @@ dotenv.config();
     }
 };
 
- export  const createAdditionalTables = async () => {
-    try {
-        // Create announcements table
-        await sql`
-            CREATE TABLE IF NOT EXISTS announcements (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                title VARCHAR(255) NOT NULL,
-                content TEXT,
-                content_type content_type NOT NULL,
-                media_url TEXT,
-                thumbnail_url TEXT,
-                is_approved BOOLEAN DEFAULT false,
+//  export  const createAdditionalTables = async () => {
+//     try {
+//         // Create announcements table
+//         await sql`
+//             CREATE TABLE IF NOT EXISTS announcements (
+//                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+//                 title VARCHAR(255) NOT NULL,
+//                 content TEXT,
+//                 content_type content_type NOT NULL,
+//                 media_url TEXT,
+//                 thumbnail_url TEXT,
+//                 is_approved BOOLEAN DEFAULT false,
 
-                -- Timestamps
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-        `;
+//                 -- Timestamps
+//                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+//                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+//             );
+//         `;
 
-        // Create media gallery table
-        await sql`
-            CREATE TABLE IF NOT EXISTS media_gallery (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                admin_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                title VARCHAR(255) NOT NULL,
-                description TEXT,
-                file_url TEXT NOT NULL,
-                file_type VARCHAR(50),
+//         // Create media gallery table
+//         await sql`
+//             CREATE TABLE IF NOT EXISTS media_gallery (
+//                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+//                 admin_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+//                 title VARCHAR(255) NOT NULL,
+//                 description TEXT,
+//                 file_url TEXT NOT NULL,
+//                 file_type VARCHAR(50),
                 
-                -- Timestamps
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-        `;
+//                 -- Timestamps
+//                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+//                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+//             );
+//         `;
 
-        console.log('Additional tables (Announcements and Media Gallery) created successfully');
-    } catch (error) {
-        console.error('Error creating additional tables:', error.message);
-    }
-};
+//         console.log('Additional tables (Announcements and Media Gallery) created successfully');
+//     } catch (error) {
+//         console.error('Error creating additional tables:', error.message);
+//     }
+// };
 
- export  const initializeDatabaseTables = async () => {
+   const initializeDatabaseTables = async () => {
     try {
         await createUsersTable();
-        await createAdditionalTables();
-        console.log('Database tables initialized successfully');
+        console.log('users Database tables initialized successfully');
     } catch (error) {
-        console.error('Error initializing database tables:', error.message);
+        console.error('Error initializing users database tables:', error.message);
     }
 };
+
+module.exports = {
+    initializeDatabaseTables, sql, createUsersTable
+}

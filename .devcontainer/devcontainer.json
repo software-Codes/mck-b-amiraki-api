@@ -5,7 +5,35 @@
         "vscode": {
             "settings": {
                 "terminal.integrated.defaultProfile.linux": "bash",
-                "terminal.integrated.shell.linux": "/bin/bash"
+                "terminal.integrated.profiles.linux": {
+                    "bash": {
+                        "path": "/bin/bash"
+                    }
+                },
+                "terminal.integrated.fontSize": 14,
+                "terminal.integrated.fontWeight": "normal",
+                "workbench.colorCustomizations": {
+                    "terminal.background": "#0C2B0C",
+                    "terminal.foreground": "#00FF00",
+                    "terminal.ansiBlack": "#000000",
+                    "terminal.ansiBlue": "#0066FF",
+                    "terminal.ansiBrightBlack": "#666666",
+                    "terminal.ansiBrightBlue": "#0099FF",
+                    "terminal.ansiBrightCyan": "#00FFFF",
+                    "terminal.ansiBrightGreen": "#33FF33",
+                    "terminal.ansiBrightMagenta": "#FF00FF",
+                    "terminal.ansiBrightRed": "#FF0000",
+                    "terminal.ansiBrightWhite": "#FFFFFF",
+                    "terminal.ansiBrightYellow": "#FFFF00",
+                    "terminal.ansiCyan": "#00CCCC",
+                    "terminal.ansiGreen": "#00FF00",
+                    "terminal.ansiMagenta": "#CC00CC",
+                    "terminal.ansiRed": "#CC0000",
+                    "terminal.ansiWhite": "#CCCCCC",
+                    "terminal.ansiYellow": "#CCCC00",
+                    "terminalCursor.background": "#000000",
+                    "terminalCursor.foreground": "#00FF00"
+                }
             },
             "extensions": [
                 "dbaeumer.vscode-eslint",
@@ -27,8 +55,10 @@
         "DOCKER_HOST": "unix:///var/run/docker.sock"
     },
     "runArgs": [
-        "--privileged",
-        "-v", "/var/run/docker.sock:/var/run/docker.sock"
+        "--privileged"
     ],
-    "forwardPorts": [3000]
-  }
+    "forwardPorts": [3000],
+    "mounts": [
+        "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    ]
+}

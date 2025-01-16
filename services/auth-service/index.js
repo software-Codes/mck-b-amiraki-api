@@ -1,6 +1,8 @@
 // Server.js
-import dotenv from 'dotenv';
-import { createApp } from './app/app.js';
+
+
+const dotenv = require('dotenv')
+const createApp = require('./src/app.js')
 
 // Load environment variables
 dotenv.config();

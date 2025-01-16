@@ -1,12 +1,12 @@
-// app/app.js
-import express from "express";
-import http from "http";
-import cors from "cors";
-import helmet from "helmet";
-import { rateLimit } from "express-rate-limit";
-import { initializeDatabaseTables } from "./config/database";
+const express = require("express");
+const http = require("http");
+const cors = require("cors");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const { initializeDatabaseTables, sql } = require("./config/database");
 
-export const createApp = () => {
+
+const createApp = () => {
   const app = express();
   const server = http.createServer(app);
 
@@ -124,3 +124,5 @@ export const createApp = () => {
     initialize
   };
 };
+
+module.exports = createApp;
