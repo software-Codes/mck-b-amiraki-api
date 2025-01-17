@@ -2,9 +2,39 @@
 const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const imagekit = require('../config/imagekit');
+const imagekit = require("../config/imagekit");
+const twilio = require("twilio");
 
-// Create a new user
+// Initialize Twilio client
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+// Generate verification code
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+// Send verification code via SMS and WhatsApp
+const sendVerificationCode = async (phoneNumber, code) => {
+  try {
+    // Send SMS
+    await twilioClient.messages.create({
+      body: `Your church app verification code is: ${code}`,
+      to: phoneNumber,
+      from: process.env.TWILIO_PHONE_NUMBER,
+    });
+
+    // Send WhatsApp message
+    await twilioClient.messages.create({
+      body: `Your church app verification code is: ${code}`,
+      to: `whatsapp:${phoneNumber}`,
+      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
+    });
+  } catch (error) {
+    throw new Error(`Error sending verification code: ${error.message}`);
+  }
+};
+
 // Upload profile photo to ImageKit
 const uploadProfilePhoto = async (file, userId) => {
   try {
@@ -39,30 +69,44 @@ const uploadProfilePhoto = async (file, userId) => {
 };
 
 // Create a new user
-const createUser = async ({
+const createUnverifiedUser = async ({
   fullName,
   email,
   password,
   phoneNumber,
   profilePhoto,
+  isAdmin = false,
 }) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationCode = generateVerificationCode();
 
+    // Create user with is_verified = false
     const user = await sql`
-            INSERT INTO users (
-                full_name,
-                email,
-                password,
-                phone_number
-            ) VALUES (
-                ${fullName},
-                ${email},
-                ${hashedPassword},
-                ${phoneNumber}
-            )
-            RETURNING id, full_name, email, phone_number, created_at;
-        `;
+      INSERT INTO users (
+        full_name,
+        email,
+        password,
+        phone_number,
+        verification_code,
+        is_admin,
+        is_verified,
+        status
+      ) VALUES (
+        ${fullName},
+        ${email},
+        ${hashedPassword},
+        ${phoneNumber},
+        ${verificationCode},
+        ${isAdmin},
+        false,
+        'pending'
+      )
+      RETURNING id, full_name, email, phone_number, created_at, status;
+    `;
+
+    // Send verification code
+    await sendVerificationCode(phoneNumber, verificationCode);
 
     // If profile photo was provided, upload it
     if (profilePhoto) {
@@ -72,8 +116,104 @@ const createUser = async ({
     return user[0];
   } catch (error) {
     if (error.code === "23505") {
-      throw new Error("Email already exists");
+      throw new Error("Email or phone number already exists");
     }
+    throw error;
+  }
+};
+
+// Verify user's phone number and activate account
+const verifyPhoneNumber = async (userId, code) => {
+  const user = await sql`
+    SELECT verification_code, phone_number
+    FROM users
+    WHERE id = ${userId} AND status = 'pending';
+  `;
+
+  if (!user[0]) {
+    throw new Error("User not found or already verified");
+  }
+
+  if (user[0].verification_code !== code) {
+    throw new Error("Invalid verification code");
+  }
+
+  // Update user status to active and mark as verified
+  const verifiedUser = await sql`
+    UPDATE users
+    SET 
+      is_verified = true,
+      verification_code = null,
+      status = 'active',
+      updated_at = NOW()
+    WHERE id = ${userId}
+    RETURNING id, full_name, email, is_verified, status;
+  `;
+
+  return verifiedUser[0];
+};
+
+// Resend verification code
+const resendVerificationCode = async (userId) => {
+  const user = await sql`
+    SELECT phone_number
+    FROM users
+    WHERE id = ${userId};
+  `;
+
+  if (!user[0]) {
+    throw new Error("User not found");
+  }
+
+  const verificationCode = generateVerificationCode();
+
+  await sql`
+    UPDATE users
+    SET 
+      verification_code = ${verificationCode},
+      updated_at = NOW()
+    WHERE id = ${userId};
+  `;
+
+  await sendVerificationCode(user[0].phone_number, verificationCode);
+  return true;
+};
+
+// Login user
+const loginUser = async (email, password) => {
+  try {
+    const user = await sql`
+      SELECT id, full_name, email, password, is_verified, is_admin
+      FROM users
+      WHERE email = ${email};
+    `;
+
+    if (!user[0]) {
+      throw new Error("Invalid email or password");
+    }
+
+    const isValidPassword = await bcrypt.compare(password, user[0].password);
+    if (!isValidPassword) {
+      throw new Error("Invalid email or password");
+    }
+
+    const token = jwt.sign(
+      {
+        userId: user[0].id,
+        email: user[0].email,
+        isVerified: user[0].is_verified,
+        isAdmin: user[0].is_admin,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "24h" }
+    );
+
+    const { password: _, ...userWithoutPassword } = user[0];
+    return {
+      user: userWithoutPassword,
+      token,
+    };
+  } catch (error) {
     throw error;
   }
 };
@@ -102,48 +242,6 @@ const updateProfilePhoto = async (userId, file) => {
   }
 };
 
-// Login user
-const loginUser = async (email, password) => {
-  try {
-    // Find user by email
-    const user = await sql`
-      SELECT id, full_name, email, password, is_verified
-      FROM users
-      WHERE email = ${email};
-    `;
-
-    if (!user[0]) {
-      throw new Error("Invalid email or password");
-    }
-
-    // Verify password
-    const isValidPassword = await bcrypt.compare(password, user[0].password);
-    if (!isValidPassword) {
-      throw new Error("Invalid email or password");
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        userId: user[0].id,
-        email: user[0].email,
-        isVerified: user[0].is_verified,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "24h" }
-    );
-
-    // Return user data without password and include token
-    const { password: _, ...userWithoutPassword } = user[0];
-    return {
-      user: userWithoutPassword,
-      token,
-    };
-  } catch (error) {
-    throw error;
-  }
-};
-
 // Verify JWT token
 const verifyToken = async (token) => {
   try {
@@ -155,7 +253,7 @@ const verifyToken = async (token) => {
     }
 
     return user;
-  } catch (error) {
+  } catch (error) { 
     throw new Error("Invalid token");
   }
 };
@@ -236,18 +334,46 @@ const deleteUser = async (userId) => {
   `;
   return result[0];
 };
+const verifyAdminCode = async (code) => {
+  const result = await sql`
+      SELECT * FROM admin_registration_codes
+      WHERE code = ${code}
+      AND used = false;
+  `;
+  return result.length > 0;
+};
+
+const storeAdminCode = async (code, createdBy) => {
+  await sql`
+      INSERT INTO admin_registration_codes (code, created_by)
+      VALUES (${code}, ${createdBy});
+  `;
+};
+
+const markAdminCodeAsUsed = async (code, usedBy) => {
+  await sql`
+      UPDATE admin_registration_codes
+      SET used = true,
+          used_at = NOW(),
+          used_by = ${usedBy}
+      WHERE code = ${code};
+  `;
+};
 
 module.exports = {
-  createUser,
+  createUnverifiedUser,
   loginUser,
+  verifyPhoneNumber,
+  resendVerificationCode,
   updateProfilePhoto,
   uploadProfilePhoto,
-  imagekit,
-  verifyToken,
   findUserByEmail,
   findUserById,
   updateUser,
   updatePassword,
   verifyPassword,
   deleteUser,
+  verifyAdminCode,
+  storeAdminCode,
+  markAdminCodeAsUsed,
 };
