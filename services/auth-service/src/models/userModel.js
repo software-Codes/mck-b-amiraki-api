@@ -1,75 +1,9 @@
-// src/models/user.js
+// src/models/userModel.js
 const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const imagekit = require("../config/imagekit");
-const twilio = require("twilio");
 
-// Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
-// Generate verification code
-const generateVerificationCode = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
-// Send verification code via SMS and WhatsApp
-const sendVerificationCode = async (phoneNumber, code) => {
-  try {
-    // Send SMS
-    await twilioClient.messages.create({
-      body: `Your church app verification code is: ${code}`,
-      to: phoneNumber,
-      from: process.env.TWILIO_PHONE_NUMBER,
-    });
-
-    // Send WhatsApp message
-    await twilioClient.messages.create({
-      body: `Your church app verification code is: ${code}`,
-      to: `whatsapp:${phoneNumber}`,
-      from: `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`,
-    });
-  } catch (error) {
-    throw new Error(`Error sending verification code: ${error.message}`);
-  }
-};
-
-// Upload profile photo to ImageKit
-const uploadProfilePhoto = async (file, userId) => {
-  try {
-    // Upload to ImageKit
-    const upload = await imagekit.upload({
-      file: file.buffer.toString("base64"),
-      fileName: `profile-${userId}-${Date.now()}`,
-      folder: "/profile-photos",
-      transformation: [
-        {
-          height: 400,
-          width: 400,
-          crop: "at_max",
-        },
-      ],
-    });
-
-    // Update user's profile_picture_url in database
-    const user = await sql`
-            UPDATE users 
-            SET 
-                profile_picture_url = ${upload.url},
-                updated_at = NOW()
-            WHERE id = ${userId}
-            RETURNING id, full_name, email, profile_picture_url;
-        `;
-
-    return user[0];
-  } catch (error) {
-    throw new Error(`Error uploading profile photo: ${error.message}`);
-  }
-};
-
-// Create a new user
-const createUnverifiedUser = async ({
+const createUser = async ({
   fullName,
   email,
   password,
@@ -79,36 +13,32 @@ const createUnverifiedUser = async ({
 }) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationCode = generateVerificationCode();
 
-    // Create user with is_verified = false
+    // Create user
     const user = await sql`
       INSERT INTO users (
         full_name,
         email,
         password,
         phone_number,
-        verification_code,
         is_admin,
-        is_verified,
-        status
+        status,
+        created_at,
+        updated_at
       ) VALUES (
         ${fullName},
         ${email},
         ${hashedPassword},
         ${phoneNumber},
-        ${verificationCode},
         ${isAdmin},
-        false,
-        'pending'
+        'active',
+        NOW(),
+        NOW()
       )
       RETURNING id, full_name, email, phone_number, created_at, status;
     `;
 
-    // Send verification code
-    await sendVerificationCode(phoneNumber, verificationCode);
-
-    // If profile photo was provided, upload it
+    // Handle profile photo if provided
     if (profilePhoto) {
       return await uploadProfilePhoto(profilePhoto, user[0].id);
     }
@@ -122,70 +52,12 @@ const createUnverifiedUser = async ({
   }
 };
 
-// Verify user's phone number and activate account
-const verifyPhoneNumber = async (userId, code) => {
-  const user = await sql`
-    SELECT verification_code, phone_number
-    FROM users
-    WHERE id = ${userId} AND status = 'pending';
-  `;
-
-  if (!user[0]) {
-    throw new Error("User not found or already verified");
-  }
-
-  if (user[0].verification_code !== code) {
-    throw new Error("Invalid verification code");
-  }
-
-  // Update user status to active and mark as verified
-  const verifiedUser = await sql`
-    UPDATE users
-    SET 
-      is_verified = true,
-      verification_code = null,
-      status = 'active',
-      updated_at = NOW()
-    WHERE id = ${userId}
-    RETURNING id, full_name, email, is_verified, status;
-  `;
-
-  return verifiedUser[0];
-};
-
-// Resend verification code
-const resendVerificationCode = async (userId) => {
-  const user = await sql`
-    SELECT phone_number
-    FROM users
-    WHERE id = ${userId};
-  `;
-
-  if (!user[0]) {
-    throw new Error("User not found");
-  }
-
-  const verificationCode = generateVerificationCode();
-
-  await sql`
-    UPDATE users
-    SET 
-      verification_code = ${verificationCode},
-      updated_at = NOW()
-    WHERE id = ${userId};
-  `;
-
-  await sendVerificationCode(user[0].phone_number, verificationCode);
-  return true;
-};
-
-// Login user
 const loginUser = async (email, password) => {
   try {
     const user = await sql`
-      SELECT id, full_name, email, password, is_verified, is_admin
+      SELECT id, full_name, email, password, is_admin, status
       FROM users
-      WHERE email = ${email};
+      WHERE email = ${email} AND status = 'active';
     `;
 
     if (!user[0]) {
@@ -201,7 +73,6 @@ const loginUser = async (email, password) => {
       {
         userId: user[0].id,
         email: user[0].email,
-        isVerified: user[0].is_verified,
         isAdmin: user[0].is_admin,
       },
       process.env.JWT_SECRET,
@@ -218,86 +89,60 @@ const loginUser = async (email, password) => {
   }
 };
 
-// Update profile photo
-const updateProfilePhoto = async (userId, file) => {
-  try {
-    // Get current user to delete old photo if exists
-    const currentUser = await findUserById(userId);
-    if (currentUser.profile_picture_url) {
-      // Extract fileId from URL and delete from ImageKit
-      const fileId = currentUser.profile_picture_url
-        .split("/")
-        .pop()
-        .split(".")[0];
-      try {
-        await imagekit.deleteFile(fileId);
-      } catch (error) {
-        console.error("Error deleting old profile photo:", error);
-      }
-    }
-
-    return await uploadProfilePhoto(file, userId);
-  } catch (error) {
-    throw new Error(`Error updating profile photo: ${error.message}`);
-  }
-};
-
-// Verify JWT token
-const verifyToken = async (token) => {
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await findUserById(decoded.userId);
-
-    if (!user) {
-      throw new Error("User not found");
-    }
-
-    return user;
-  } catch (error) { 
-    throw new Error("Invalid token");
-  }
-};
-
-// Find user by email
-const findUserByEmail = async (email) => {
-  const users = await sql`
-    SELECT id, full_name, email, password, phone_number, is_verified
-    FROM users
-    WHERE email = ${email};
-  `;
-  return users[0];
-};
-
-// Find user by ID
-const findUserById = async (userId) => {
-  const users = await sql`
-    SELECT id, full_name, email, phone_number, is_verified, created_at, updated_at
+// Get user by ID
+const getUserById = async (userId) => {
+  const user = await sql`
+    SELECT id, full_name, email, phone_number, is_admin, status, created_at, updated_at
     FROM users
     WHERE id = ${userId};
   `;
-  return users[0];
+  return user[0];
 };
 
-// Update user information
+// Get all users (with pagination)
+const getAllUsers = async (page = 1, limit = 10) => {
+  const offset = (page - 1) * limit;
+  
+  const users = await sql`
+    SELECT 
+      id, full_name, email, phone_number, is_admin, status, created_at, updated_at
+    FROM users
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+    OFFSET ${offset};
+  `;
+
+  const totalUsers = await sql`
+    SELECT COUNT(*) FROM users;
+  `;
+
+  return {
+    users,
+    total: totalUsers[0].count,
+    page,
+    totalPages: Math.ceil(totalUsers[0].count / limit)
+  };
+};
+
+// Update user
 const updateUser = async (userId, updates) => {
-  const allowedUpdates = ["full_name", "phone_number"];
-  const setValues = [];
+  const allowedUpdates = ["full_name", "phone_number", "email"];
+  const updateFields = [];
   const values = [];
 
   Object.keys(updates).forEach((key) => {
     if (allowedUpdates.includes(key) && updates[key] !== undefined) {
-      setValues.push(`${key} = $${setValues.length + 1}`);
+      updateFields.push(`${key} = $${updateFields.length + 1}`);
       values.push(updates[key]);
     }
   });
 
-  if (setValues.length === 0) return null;
+  if (updateFields.length === 0) return null;
 
   values.push(userId);
-
   const query = `
     UPDATE users 
-    SET ${setValues.join(", ")}, updated_at = NOW()
+    SET ${updateFields.join(", ")}, updated_at = NOW()
     WHERE id = $${values.length}
     RETURNING id, full_name, email, phone_number, updated_at;
   `;
@@ -307,22 +152,27 @@ const updateUser = async (userId, updates) => {
 };
 
 // Update password
-const updatePassword = async (userId, newPassword) => {
-  const hashedPassword = await bcrypt.hash(newPassword, 10);
+const updatePassword = async (userId, currentPassword, newPassword) => {
+  const user = await getUserById(userId);
+  if (!user) {
+    throw new Error("User not found");
+  }
 
-  const user = await sql`
+  const isValidPassword = await bcrypt.compare(currentPassword, user.password);
+  if (!isValidPassword) {
+    throw new Error("Current password is incorrect");
+  }
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  await sql`
     UPDATE users
-    SET password = ${hashedPassword}, updated_at = NOW()
+    SET 
+      password = ${hashedPassword},
+      updated_at = NOW()
     WHERE id = ${userId}
-    RETURNING id;
   `;
 
-  return user[0];
-};
-
-// Verify user's password
-const verifyPassword = async (plainPassword, hashedPassword) => {
-  return bcrypt.compare(plainPassword, hashedPassword);
+  return true;
 };
 
 // Delete user
@@ -334,46 +184,32 @@ const deleteUser = async (userId) => {
   `;
   return result[0];
 };
-const verifyAdminCode = async (code) => {
-  const result = await sql`
-      SELECT * FROM admin_registration_codes
-      WHERE code = ${code}
-      AND used = false;
-  `;
-  return result.length > 0;
-};
 
-const storeAdminCode = async (code, createdBy) => {
-  await sql`
-      INSERT INTO admin_registration_codes (code, created_by)
-      VALUES (${code}, ${createdBy});
-  `;
-};
+// Update user status (active/inactive)
+const updateUserStatus = async (userId, status) => {
+  if (!['active', 'inactive'].includes(status)) {
+    throw new Error("Invalid status");
+  }
 
-const markAdminCodeAsUsed = async (code, usedBy) => {
-  await sql`
-      UPDATE admin_registration_codes
-      SET used = true,
-          used_at = NOW(),
-          used_by = ${usedBy}
-      WHERE code = ${code};
+  const user = await sql`
+    UPDATE users
+    SET 
+      status = ${status},
+      updated_at = NOW()
+    WHERE id = ${userId}
+    RETURNING id, status;
   `;
+
+  return user[0];
 };
 
 module.exports = {
-  createUnverifiedUser,
+  createUser,
   loginUser,
-  verifyPhoneNumber,
-  resendVerificationCode,
-  updateProfilePhoto,
-  uploadProfilePhoto,
-  findUserByEmail,
-  findUserById,
+  getUserById,
+  getAllUsers,
   updateUser,
   updatePassword,
-  verifyPassword,
   deleteUser,
-  verifyAdminCode,
-  storeAdminCode,
-  markAdminCodeAsUsed,
+  updateUserStatus
 };

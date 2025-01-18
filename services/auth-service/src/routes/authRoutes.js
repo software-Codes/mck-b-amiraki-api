@@ -1,24 +1,12 @@
-// src/routes/authRoutes.js
+// src/routes/userRoute.js
 const express = require("express");
 const router = express.Router();
-const {
-  register,
-  login,
-  getProfile,
-  updateProfile,
-  changePassword,
-  updateProfilePhoto,
-  verifyPhone,
-  resendVerificationCode,
-  deleteAccount,
-} = require("../controllers/authController");
-
-const {
-  authMiddleware,
-  requireVerified,
-  requireAdmin,
+const userController = require('../controllers/authController');
+const { 
+  authMiddleware, 
+  requireVerified, 
+  requireAdmin 
 } = require("../middleware/authMiddleware");
-
 const {
   validate,
   registerValidation,
@@ -27,71 +15,85 @@ const {
   changePasswordValidation,
   verifyPhoneValidation
 } = require("../middleware/validationMiddleware");
+const multer = require("multer");
 
-const upload = require("../middleware/upload");
+// Configure Multer for file uploads (e.g., profile photos)
+const upload = multer({ dest: "uploads/" });
 
-// Public routes
+// Routes
+
+// Register a new user
 router.post(
   "/register",
   upload.single("profilePhoto"),
   validate(registerValidation),
-  register
+  userController.register
 );
 
+// Login a user
 router.post(
-  "/login", 
-  validate(loginValidation), 
-  login
+  "/login",
+  userController.login
 );
 
-// Protected routes
-router.use(authMiddleware);
-
-// Verification routes
-router.post(
-  "/verify-phone",
-  validate(verifyPhoneValidation),
-  verifyPhone
-);
-
-router.post(
-  "/resend-verification",
-  resendVerificationCode
-);
-
-// Protected routes that require verification
-router.use(requireVerified);
-
-// Profile routes
+// Get user profile (Authenticated users only)
 router.get(
-  "/profile", 
-  getProfile
+  "/profile",
+  authMiddleware,
+  userController.getProfile
 );
 
+// Get all users (Admin only)
+router.get(
+  "/all",
+  authMiddleware,
+  requireAdmin,
+  userController.getAllUsers
+);
+
+// Update user profile (Authenticated users only)
 router.put(
   "/profile",
+  authMiddleware,
   validate(updateProfileValidation),
-  updateProfile
+  userController.updateProfile
 );
 
+// Change password (Authenticated users only)
 router.put(
-  "/profile/photo",
-  upload.single("profilePhoto"),
-  updateProfilePhoto
-);
-
-// Password routes
-router.put(
-  "/password",
+  "/change-password",
+  authMiddleware,
   validate(changePasswordValidation),
-  changePassword
+  userController.changePassword
 );
 
-// Admin routes
+// Delete account (Authenticated users only)
 router.delete(
-  "/users/:userId",
+  "/delete-account",
+  authMiddleware,
+  userController.deleteAccount
+);
+
+// Update user status (Admin only)
+router.put(
+  "/status/:userId",
+  authMiddleware,
   requireAdmin,
-  deleteAccount
+  userController.updateUserStatus
+);
+
+// Optional: Add phone verification route if applicable
+router.post(
+  "/verify-phone",
+  authMiddleware,
+  validate(verifyPhoneValidation),
+  (req, res) => {
+    // Example implementation (to be added if necessary)
+    res.status(200).json({
+      status: "success",
+      message: "Phone verification not implemented yet."
+    });
+  }
 );
 
 module.exports = router;

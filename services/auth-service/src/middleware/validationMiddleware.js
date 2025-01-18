@@ -61,16 +61,7 @@ const registerValidation = [
         }
         return true;
       }),
-  
-    body('confirmPassword')
-      .notEmpty()
-      .withMessage('Password confirmation is required')
-      .custom((value, { req }) => {
-        if (value !== req.body.password) {
-          throw new Error('Password confirmation does not match password');
-        }
-        return true;
-      }),
+
   ];
   
 
