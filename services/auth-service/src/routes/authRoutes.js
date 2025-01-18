@@ -1,99 +1,62 @@
-// src/routes/userRoute.js
+// src/routes/userRoutes.js
 const express = require("express");
 const router = express.Router();
 const userController = require('../controllers/authController');
 const { 
-  authMiddleware, 
-  requireVerified, 
-  requireAdmin 
+    authMiddleware, 
+    requireAdmin,
+    requireActive
 } = require("../middleware/authMiddleware");
-const {
-  validate,
-  registerValidation,
-  loginValidation,
-  updateProfileValidation,
-  changePasswordValidation,
-  verifyPhoneValidation
-} = require("../middleware/validationMiddleware");
 const multer = require("multer");
 
-// Configure Multer for file uploads (e.g., profile photos)
-const upload = multer({ dest: "uploads/" });
+// Configure Multer with file size and type restrictions
+const upload = multer({
+    dest: "uploads/",
+    limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed!'), false);
+        }
+    }
+});
 
-// Routes
+// Public routes
+router.post("/register", upload.single("profilePhoto"), userController.register);
+router.post("/register-admin", userController.registerAdmin);
+router.post("/login", userController.login);
 
-// Register a new user
-router.post(
-  "/register",
-  upload.single("profilePhoto"),
-  validate(registerValidation),
-  userController.register
-);
+// Protected routes - regular users
+router.use(authMiddleware, requireActive);
 
-// Login a user
-router.post(
-  "/login",
-  userController.login
-);
+router.get("/profile", userController.getProfile);
+router.put("/profile", upload.single("profilePhoto"), userController.updateProfile);
+router.put("/change-password", userController.changePassword);
+router.delete("/account", userController.deleteAccount);
 
-// Get user profile (Authenticated users only)
-router.get(
-  "/profile",
-  authMiddleware,
-  userController.getProfile
-);
+// Admin only routes
+router.get("/users", requireAdmin, userController.getAllUsers);
+router.get("/users/:userId", requireAdmin, userController.getUser);
+router.put("/users/:userId", requireAdmin, userController.updateUser);
+router.delete("/users/:userId", requireAdmin, userController.deleteUser);
 
-// Get all users (Admin only)
-router.get(
-  "/all",
-  authMiddleware,
-  requireAdmin,
-  userController.getAllUsers
-);
-
-// Update user profile (Authenticated users only)
-router.put(
-  "/profile",
-  authMiddleware,
-  validate(updateProfileValidation),
-  userController.updateProfile
-);
-
-// Change password (Authenticated users only)
-router.put(
-  "/change-password",
-  authMiddleware,
-  validate(changePasswordValidation),
-  userController.changePassword
-);
-
-// Delete account (Authenticated users only)
-router.delete(
-  "/delete-account",
-  authMiddleware,
-  userController.deleteAccount
-);
-
-// Update user status (Admin only)
-router.put(
-  "/status/:userId",
-  authMiddleware,
-  requireAdmin,
-  userController.updateUserStatus
-);
-
-// Optional: Add phone verification route if applicable
-router.post(
-  "/verify-phone",
-  authMiddleware,
-  validate(verifyPhoneValidation),
-  (req, res) => {
-    // Example implementation (to be added if necessary)
-    res.status(200).json({
-      status: "success",
-      message: "Phone verification not implemented yet."
-    });
-  }
-);
+// Error handling for multer
+router.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        return res.status(400).json({
+            status: "error",
+            message: "File upload error: " + error.message
+        });
+    } else if (error) {
+        return res.status(400).json({
+            status: "error",
+            message: error.message
+        });
+    }
+    next();
+});
 
 module.exports = router;
