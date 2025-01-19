@@ -1,6 +1,7 @@
 const userModel = require("../models/userModel");
 const { validationResult } = require("express-validator");
 const logger = require("../config/logger");
+const { verify } = require("jsonwebtoken");
 const { UserRoles } = userModel;
 
 // Register new user
@@ -50,7 +51,7 @@ const register = async (req, res) => {
   }
 };
 
-// Register admin
+// Register admin with email verification
 const registerAdmin = async (req, res) => {
   const logContext = `UserController.registerAdmin: ${req.body.email}`;
 
@@ -66,24 +67,31 @@ const registerAdmin = async (req, res) => {
       });
     }
 
-    const { fullName, email, password, phoneNumber, adminSecretKey } = req.body;
+    const { fullName, email, password, phoneNumber, is_super_admin } = req.body;
 
+    // Create admin account
     const admin = await userModel.createAdmin({
       fullName,
       email,
       password,
       phoneNumber,
-      adminSecretKey,
+      is_super_admin
     });
 
-    logger.info(`${logContext} - Admin registered successfully`, {
-      userId: admin.id,
+    // Log success after admin creation
+    logger.info(`${logContext} - Admin registered and verification email sent`, {
+      adminId: admin.id,
+      adminEmail: email  // Use email from request body
     });
 
     res.status(201).json({
       status: "success",
-      message: "Admin registration successful",
-      data: admin
+      message: "Admin registration initiated. Please check your email for verification code",
+      data: {
+        id: admin.id,
+        email: email,    // Use email from request body
+        status: 'pending'
+      }
     });
   } catch (error) {
     logger.error(`${logContext} - Admin registration failed`, {
@@ -95,7 +103,44 @@ const registerAdmin = async (req, res) => {
     });
   }
 };
+// Verify admin account
+const verifyAdmin = async (req, res) => {
+  const logContext = `UserController.verifyAdmin: ${req.body.email}`;
 
+  try {
+    logger.info(`${logContext} - Attempting admin verification`);
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
+      return res.status(400).json({
+        status: "error",
+        errors: errors.array(),
+      });
+    }
+
+    const { email, verificationCode } = req.body;
+    const verifiedAdmin = await userModel.verifyAdminAccount(email, verificationCode);
+
+    logger.info(`${logContext} - Admin verified successfully`, {
+      userId: verifiedAdmin.id,
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: "Admin account verified successfully",
+      data: verifiedAdmin
+    });
+  } catch (error) {
+    logger.error(`${logContext} - Admin verification failed`, {
+      error: error.message,
+    });
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+};
 // Login user
 const login = async (req, res) => {
   
@@ -377,6 +422,7 @@ const deleteUser = async (req, res) => {
 module.exports = {
   register,
   registerAdmin,
+  verifyAdmin,
   login,
   getProfile,
   getUser,

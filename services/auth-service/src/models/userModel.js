@@ -1,6 +1,12 @@
 const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const EmailService = require("../services/nodemailer");
+
+//generate 6-code verification code
+const generateVerificationCode = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 // User roles enum
 const UserRoles = {
@@ -65,22 +71,20 @@ const createUser = async ({
   }
 };
 
-// Create admin user (requires admin secret key)
+// Create admin user with verification
 const createAdmin = async ({
   fullName,
   email,
   password,
   phoneNumber,
-  adminSecretKey,
+  is_super_admin = false
 }) => {
   try {
-    // Verify admin secret key
-    if (adminSecretKey !== process.env.ADMIN_SECRET_KEY) {
-      throw new Error("Invalid admin secret key");
-    }
-
     const hashedPassword = await bcrypt.hash(password, 10);
+    const verificationCode = generateVerificationCode();
+    const verificationExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
+    // Create unverified admin
     const admin = await sql`
       INSERT INTO users (
         full_name,
@@ -89,6 +93,9 @@ const createAdmin = async ({
         phone_number,
         role,
         status,
+        is_super_admin,
+        verification_code,
+        verification_code_expires_at,
         created_at,
         updated_at
       ) VALUES (
@@ -97,21 +104,67 @@ const createAdmin = async ({
         ${hashedPassword},
         ${phoneNumber},
         ${UserRoles.ADMIN},
-        'active',
+        'pending',
+        ${is_super_admin},
+        ${verificationCode},
+        ${verificationExpiry},
         NOW(),
         NOW()
       )
-      RETURNING id, full_name, email, phone_number, role, created_at, status;
+      RETURNING id, full_name, email, phone_number, role, status;
     `;
 
-    return admin[0];
+    // Send verification code
+    await emailService.sendVerificationCode(email, verificationCode);
+
+    return admin[0];  // Return the first row of the result
   } catch (error) {
     if (error.code === "23505") {
       throw new Error("Email or phone number already exists");
     }
     throw error;
   }
-};
+};  
+// Verify admin account
+const verifyAdminAccount = async (email, verificationCode) => {
+  try {
+    const admin = await sql`
+      SELECT id, verification_code, verification_code_expires_at
+      FROM users
+      WHERE email = ${email}
+      AND role = ${UserRoles.ADMIN}
+      AND status = 'pending';
+    `;
+
+    if (!admin[0]) {
+      throw new Error("Invalid verification attempt");
+    }
+
+    if (new Date() > new Date(admin[0].verification_code_expires_at)) {
+      throw new Error("Verification code has expired");
+    }
+
+    if (admin[0].verification_code !== verificationCode) {
+      throw new Error("Invalid verification code");
+    }
+        // Activate admin account
+        const verifiedAdmin = await sql`
+        UPDATE users
+        SET 
+          status = 'active',
+          verification_code = null,
+          verification_code_expires_at = null,
+          updated_at = NOW()
+        WHERE id = ${admin[0].id}
+        RETURNING id, full_name, email, phone_number, role, status;
+      `;
+  
+      return verifiedAdmin[0];
+    } catch (error) {
+      throw error;
+    }
+  };
+  
 
 // Enhanced login with role-based token generation
 const loginUser = async (email, password) => {
@@ -323,6 +376,7 @@ module.exports = {
   UserRoles,
   createUser,
   createAdmin,
+  verifyAdminAccount,
   loginUser,
   getUserById,
   getAllUsers,

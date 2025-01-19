@@ -1,4 +1,3 @@
-// src/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const { sql } = require('../config/database');
 const logger = require('../config/logger');
@@ -26,16 +25,28 @@ const authMiddleware = async (req, res, next) => {
 
             // Check if user exists and is active
             const user = await sql`
-                SELECT id, email, role, status, full_name, last_login
+                SELECT id, email, role, status, full_name, last_login, is_super_admin
                 FROM users
-                WHERE id = ${decoded.userId} AND status = 'active';
+                WHERE id = ${decoded.userId};
             `;
 
             if (!user[0]) {
-                logger.warn(`${logContext} - User not found or inactive`, { userId: decoded.userId });
+                logger.warn(`${logContext} - User not found`, { userId: decoded.userId });
                 return res.status(401).json({
                     status: 'error',
-                    message: 'User account is not active'
+                    message: 'Invalid authentication'
+                });
+            }
+
+            // Check if user is active
+            if (user[0].status !== 'active') {
+                let message = 'Account is not active';
+                if (user[0].status === 'pending' && user[0].role === UserRoles.ADMIN) {
+                    message = 'Admin account pending verification. Please check your email.';
+                }
+                return res.status(401).json({
+                    status: 'error',
+                    message
                 });
             }
 
@@ -79,21 +90,27 @@ const authMiddleware = async (req, res, next) => {
     }
 };
 
-// Middleware to check user role
-const checkRole = (roles) => {
-    return (req, res, next) => {
-        if (!roles.includes(req.user.role)) {
-            return res.status(403).json({
-                status: 'error',
-                message: 'Unauthorized access'
-            });
-        }
-        next();
-    };
+// Super admin middleware
+const requireSuperAdmin = (req, res, next) => {
+    if (!req.user.is_super_admin) {
+        return res.status(403).json({
+            status: 'error',
+            message: 'Super admin access required'
+        });
+    }
+    next();
 };
 
-// Admin only middleware
-const requireAdmin = checkRole([UserRoles.ADMIN]);
+// Admin only middleware (includes super admin)
+const requireAdmin = (req, res, next) => {
+    if (req.user.role !== UserRoles.ADMIN) {
+        return res.status(403).json({
+            status: 'error',
+            message: 'Admin access required'
+        });
+    }
+    next();
+};
 
 // Optional: Active status middleware
 const requireActive = (req, res, next) => {
@@ -109,6 +126,6 @@ const requireActive = (req, res, next) => {
 module.exports = {
     authMiddleware,
     requireAdmin,
-    requireActive,
-    checkRole
+    requireSuperAdmin,
+    requireActive
 };

@@ -2,11 +2,9 @@ const nodemailer = require("nodemailer");
 class EmailService {
   constructor() {
     this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: process.env.SMTP_PORT,
       secure: true,
       auth: {
-        user: process.env.SMTP_USER,
+        user: process.env.SMTP_FROM_EMAIL,
         pass: process.env.SMTP_PASSWORD,
       },
     });
@@ -15,7 +13,7 @@ class EmailService {
   async sendVerificationCode(email, verificatioCode) {
     try {
       const mailOptions = {
-        from: process.env.SMTP_USER,
+        from: process.env.SMTP_FROM_EMAIL,
         to: email,
         subject: "Admin Account Verification Code",
         html: `
