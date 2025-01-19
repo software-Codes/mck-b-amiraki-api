@@ -1,8 +1,7 @@
 const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const EmailService = require("../services/nodemailer");
-
+const emailService = require('../services/nodemailer');
 //generate 6-code verification code
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();

@@ -3,7 +3,6 @@ const { validationResult } = require("express-validator");
 const logger = require("../config/logger");
 const { verify } = require("jsonwebtoken");
 const { UserRoles } = userModel;
-
 // Register new user
 const register = async (req, res) => {
   const logContext = `UserController.register: ${req.body.email}`;
@@ -17,7 +16,7 @@ const register = async (req, res) => {
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
-      });
+      }); 
     }
 
     const { fullName, email, password, phoneNumber } = req.body;
