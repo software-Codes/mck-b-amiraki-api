@@ -43,6 +43,19 @@ const adminVerificationValidation = [
     .withMessage("Valid 6-digit verification code is required"),
 ];
 
+const updateProfileValidation = [
+  check('fullName')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Full name cannot be empty if provided'),
+  check('phoneNumber')
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage('Phone number cannot be empty if provided'),
+];
+
 // Public routes
 router.post(
   "/register",
@@ -71,6 +84,9 @@ router.use(authMiddleware, requireActive);
 router.get("/profile", userController.getProfile);
 router.put(
   "/profile",
+  authMiddleware,
+  requireActive,
+  updateProfileValidation,
   upload.single("profilePhoto"),
   userController.updateProfile
 );

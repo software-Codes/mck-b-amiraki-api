@@ -251,11 +251,16 @@ const getUser = async (req, res) => {
   }
 };
 
-// Update user profile
+// Update the updateProfile function
 const updateProfile = async (req, res) => {
+  const logContext = `UserController.updateProfile: ${req.user.id}`;
+
   try {
+    logger.info(`${logContext} - Attempting profile update`);
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
@@ -265,10 +270,16 @@ const updateProfile = async (req, res) => {
     const updates = {
       fullName: req.body.fullName,
       phoneNumber: req.body.phoneNumber,
-      email: req.body.email,
     };
 
+    // Handle profile photo if uploaded
+    if (req.file) {
+      updates.profilePhoto = req.file;
+    }
+
     const user = await userModel.updateUser(req.user.id, updates, req.user.role);
+
+    logger.info(`${logContext} - Profile updated successfully`);
 
     res.status(200).json({
       status: "success",
@@ -276,6 +287,9 @@ const updateProfile = async (req, res) => {
       data: user,
     });
   } catch (error) {
+    logger.error(`${logContext} - Profile update failed`, {
+      error: error.message,
+    });
     res.status(400).json({
       status: "error",
       message: error.message,

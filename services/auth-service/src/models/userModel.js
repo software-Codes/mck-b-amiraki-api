@@ -69,6 +69,28 @@ const createUser = async ({
     throw error;
   }
 };
+//upload profile photo
+const uploadProfilePhoto = async (userId, file) => {
+  try {
+    // Update the user's profile photo path in the database
+    const user = await sql`
+      UPDATE users 
+      SET 
+        profile_photo = ${file.path},
+        updated_at = NOW()
+      WHERE id = ${userId}
+      RETURNING id, full_name, email, phone_number, profile_photo, role, status;
+    `;
+
+    if (!user[0]) {
+      throw new Error("User not found");
+    }
+
+    return user[0];
+  } catch (error) {
+    throw error;
+  }
+};
 
 // Create admin user with verification
 const createAdmin = async ({
@@ -282,48 +304,57 @@ const getAllUsers = async (filters = {}, page = 1, limit = 10) => {
   };
 };
 
-// Enhanced update user with role-based permissions
+// Update the updateUser function to handle profile photo
+
 const updateUser = async (userId, updates, requestingUserRole) => {
-  // Define allowed fields for updates based on the user's role
-  const allowedUpdates = {
-    [UserRoles.USER]: ["full_name", "phone_number", "profile_picture"],
-    [UserRoles.ADMIN]: ["full_name", "phone_number", "profile_picture", "status", "role"],
-  };
+  try {
+    const allowedUpdates = {
+      [UserRoles.USER]: ["full_name", "phone_number"],
+      [UserRoles.ADMIN]: ["full_name", "phone_number", "status", "role"],
+    };
 
-  const updateFields = [];
-  const values = [];
-
-  // Validate and prepare the fields to update
-  Object.keys(updates).forEach((key) => {
-    if (
-      allowedUpdates[requestingUserRole].includes(key) &&
-      updates[key] !== undefined
-    ) {
-      updateFields.push(`${key} = $${updateFields.length + 1}`);
-      values.push(updates[key]);
+    // Handle profile photo separately
+    if (updates.profilePhoto) {
+      await uploadProfilePhoto(userId, updates.profilePhoto);
+      delete updates.profilePhoto;
     }
-  });
 
-  if (updateFields.length === 0) {
-    throw new Error("No valid fields to update or permission denied");
+    const updateFields = [];
+    const values = [];
+
+    Object.keys(updates).forEach((key) => {
+      if (
+        allowedUpdates[requestingUserRole].includes(key) &&
+        updates[key] !== undefined
+      ) {
+        updateFields.push(`${key} = $${updateFields.length + 1}`);
+        values.push(updates[key]);
+      }
+    });
+
+    if (updateFields.length === 0) {
+      throw new Error("No valid fields to update or permission denied");
+    }
+
+    values.push(userId);
+
+    const query = `
+      UPDATE users 
+      SET ${updateFields.join(", ")}, updated_at = NOW()
+      WHERE id = $${values.length}
+      RETURNING id, full_name, phone_number, profile_photo, role, status, updated_at;
+    `;
+
+    const result = await sql.query(query, values);
+
+    if (result.rowCount === 0) {
+      throw new Error("User not found or update failed");
+    }
+
+    return result.rows[0];
+  } catch (error) {
+    throw error;
   }
-
-  values.push(userId);
-
-  const query = `
-    UPDATE users 
-    SET ${updateFields.join(", ")}, updated_at = NOW()
-    WHERE id = $${values.length}
-    RETURNING id, full_name, phone_number, profile_picture, role, status, updated_at;
-  `;
-
-  const result = await sql.query(query, values);
-
-  if (result.rowCount === 0) {
-    throw new Error("User not found or update failed");
-  }
-
-  return result.rows[0];
 };
 
 // Enhanced password update with additional security
