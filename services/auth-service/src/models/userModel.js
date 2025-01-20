@@ -76,7 +76,7 @@ const createAdmin = async ({
   email,
   password,
   phoneNumber,
-  is_super_admin = false
+  is_super_admin = false,
 }) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -284,14 +284,16 @@ const getAllUsers = async (filters = {}, page = 1, limit = 10) => {
 
 // Enhanced update user with role-based permissions
 const updateUser = async (userId, updates, requestingUserRole) => {
+  // Define allowed fields for updates based on the user's role
   const allowedUpdates = {
-    [UserRoles.USER]: ["full_name", "phone_number"],
-    [UserRoles.ADMIN]: ["full_name", "phone_number", "email", "status", "role"],
+    [UserRoles.USER]: ["full_name", "phone_number", "profile_picture"],
+    [UserRoles.ADMIN]: ["full_name", "phone_number", "profile_picture", "status", "role"],
   };
 
   const updateFields = [];
   const values = [];
 
+  // Validate and prepare the fields to update
   Object.keys(updates).forEach((key) => {
     if (
       allowedUpdates[requestingUserRole].includes(key) &&
@@ -302,17 +304,25 @@ const updateUser = async (userId, updates, requestingUserRole) => {
     }
   });
 
-  if (updateFields.length === 0) return null;
+  if (updateFields.length === 0) {
+    throw new Error("No valid fields to update or permission denied");
+  }
 
   values.push(userId);
+
   const query = `
     UPDATE users 
     SET ${updateFields.join(", ")}, updated_at = NOW()
     WHERE id = $${values.length}
-    RETURNING id, full_name, email, phone_number, role, status, updated_at;
+    RETURNING id, full_name, phone_number, profile_picture, role, status, updated_at;
   `;
 
   const result = await sql.query(query, values);
+
+  if (result.rowCount === 0) {
+    throw new Error("User not found or update failed");
+  }
+
   return result.rows[0];
 };
 
@@ -352,24 +362,34 @@ const updatePassword = async (userId, currentPassword, newPassword) => {
   return true;
 };
 
-// Delete user (admin only)
+// Delete user (self or admin)
 const deleteUser = async (userId, requestingUserRole) => {
-  if (requestingUserRole !== UserRoles.ADMIN) {
-    throw new Error("Unauthorized: Only admins can delete users");
+  // Prevent admins from being deleted unless by another admin
+  const isAdmin = await sql`
+    SELECT role FROM users WHERE id = ${userId}
+  `;
+  if (isAdmin.length === 0) {
+    throw new Error("User not found");
+  }
+  
+  if (isAdmin[0].role === UserRoles.ADMIN && requestingUserRole !== UserRoles.ADMIN) {
+    throw new Error("Unauthorized: Only admins can delete admin accounts");
   }
 
+  // Proceed to delete the user
   const result = await sql`
     DELETE FROM users
-    WHERE id = ${userId} AND role != ${UserRoles.ADMIN}
+    WHERE id = ${userId}
     RETURNING id;
   `;
 
   if (!result[0]) {
-    throw new Error("User not found or cannot delete admin users");
+    throw new Error("User not found");
   }
 
   return result[0];
 };
+
 
 module.exports = {
   UserRoles,
