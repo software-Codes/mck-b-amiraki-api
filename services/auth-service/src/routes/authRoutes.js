@@ -6,6 +6,7 @@ const {
   requireAdmin,
   requireActive,
   requireSuperAdmin,
+  serviceAuthMiddleware,
 } = require("../middleware/authMiddleware");
 const { check } = require("express-validator");
 const multer = require("multer");
@@ -26,7 +27,7 @@ const upload = multer({
 });
 
 // Input validation middleware
-const       adminRegisterValidation = [
+const adminRegisterValidation = [
   check("fullName").trim().notEmpty().withMessage("Full name is required"),
   check("email").isEmail().withMessage("Valid email is required"),
   check("password")
@@ -44,16 +45,16 @@ const adminVerificationValidation = [
 ];
 
 const updateProfileValidation = [
-  check('fullName')
+  check("fullName")
     .optional()
     .trim()
     .notEmpty()
-    .withMessage('Full name cannot be empty if provided'),
-  check('phoneNumber')
+    .withMessage("Full name cannot be empty if provided"),
+  check("phoneNumber")
     .optional()
     .trim()
     .notEmpty()
-    .withMessage('Phone number cannot be empty if provided'),
+    .withMessage("Phone number cannot be empty if provided"),
 ];
 
 // Public routes
@@ -123,5 +124,8 @@ router.use((error, req, res, next) => {
   }
   next();
 });
+
+//handling the service-service communication
+router.post("/verify-token", serviceAuthMiddleware, userController.verifyToken);
 
 module.exports = router;

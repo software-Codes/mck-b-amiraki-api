@@ -122,10 +122,45 @@ const requireActive = (req, res, next) => {
     }
     next();
 };
+const serviceAuthMiddleware = async (req, res, next) => {
+    const logContext = 'ServiceAuthMiddleware';
+    try {
+        const serviceApiKey = req.headers['x-service-api-key'];
+        const serviceName = req.headers['x-service-name'];
 
+        console.log('Received Headers:', req.headers);
+
+        if (!serviceApiKey || !serviceName) {
+            logger.warn(`${logContext} - Missing service credentials`);
+            return res.status(401).json({
+                status: 'error',
+                message: 'Service authentication required'
+            });
+        }
+
+        const expectedApiKey = process.env[`${serviceName.toUpperCase()}_API_KEY`];
+        console.log('Expected API Key:', expectedApiKey);
+
+        if (serviceApiKey !== expectedApiKey) {
+            logger.warn(`${logContext} - Invalid service API key`, { serviceName });
+            return res.status(403).json({
+                status: 'error',
+                message: 'Invalid service authentication'
+            });
+        }
+        next();
+    } catch (error) {
+        logger.error(`${logContext} - Service authentication error`, { error: error.message });
+        return res.status(500).json({
+            status: 'error',
+            message: 'Service authentication error occurred'
+        });
+    }
+};
 module.exports = {
     authMiddleware,
     requireAdmin,
     requireSuperAdmin,
-    requireActive
+    requireActive,
+    serviceAuthMiddleware
 };

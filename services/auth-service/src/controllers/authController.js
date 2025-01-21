@@ -2,6 +2,7 @@ const userModel = require("../models/userModel");
 const { validationResult } = require("express-validator");
 const logger = require("../config/logger");
 const { verify } = require("jsonwebtoken");
+const { sql } = require("../config/database");
 const { UserRoles } = userModel;
 // Register new user
 const register = async (req, res) => {
@@ -12,11 +13,13 @@ const register = async (req, res) => {
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
+      logger.warn(`${logContext} - Validation errors`, {
+        errors: errors.array(),
+      });
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
-      }); 
+      });
     }
 
     const { fullName, email, password, phoneNumber } = req.body;
@@ -37,7 +40,7 @@ const register = async (req, res) => {
     res.status(201).json({
       status: "success",
       message: "Registration successful",
-      data: user
+      data: user,
     });
   } catch (error) {
     logger.error(`${logContext} - Registration failed`, {
@@ -59,7 +62,9 @@ const registerAdmin = async (req, res) => {
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
+      logger.warn(`${logContext} - Validation errors`, {
+        errors: errors.array(),
+      });
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
@@ -74,23 +79,27 @@ const registerAdmin = async (req, res) => {
       email,
       password,
       phoneNumber,
-      is_super_admin
+      is_super_admin,
     });
 
     // Log success after admin creation
-    logger.info(`${logContext} - Admin registered and verification email sent`, {
-      adminId: admin.id,
-      adminEmail: email  // Use email from request body
-    });
+    logger.info(
+      `${logContext} - Admin registered and verification email sent`,
+      {
+        adminId: admin.id,
+        adminEmail: email, // Use email from request body
+      }
+    );
 
     res.status(201).json({
       status: "success",
-      message: "Admin registration initiated. Please check your email for verification code",
+      message:
+        "Admin registration initiated. Please check your email for verification code",
       data: {
         id: admin.id,
-        email: email,    // Use email from request body
-        status: 'pending'
-      }
+        email: email, // Use email from request body
+        status: "pending",
+      },
     });
   } catch (error) {
     logger.error(`${logContext} - Admin registration failed`, {
@@ -111,7 +120,9 @@ const verifyAdmin = async (req, res) => {
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
+      logger.warn(`${logContext} - Validation errors`, {
+        errors: errors.array(),
+      });
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
@@ -119,7 +130,10 @@ const verifyAdmin = async (req, res) => {
     }
 
     const { email, verificationCode } = req.body;
-    const verifiedAdmin = await userModel.verifyAdminAccount(email, verificationCode);
+    const verifiedAdmin = await userModel.verifyAdminAccount(
+      email,
+      verificationCode
+    );
 
     logger.info(`${logContext} - Admin verified successfully`, {
       userId: verifiedAdmin.id,
@@ -128,7 +142,7 @@ const verifyAdmin = async (req, res) => {
     res.status(200).json({
       status: "success",
       message: "Admin account verified successfully",
-      data: verifiedAdmin
+      data: verifiedAdmin,
     });
   } catch (error) {
     logger.error(`${logContext} - Admin verification failed`, {
@@ -142,7 +156,6 @@ const verifyAdmin = async (req, res) => {
 };
 // Login user
 const login = async (req, res) => {
-  
   const logContext = `UserController.login: ${req.body.email}`;
 
   try {
@@ -161,7 +174,7 @@ const login = async (req, res) => {
 
     logger.info(`${logContext} - Login successful`, {
       userId: user.id,
-      role: user.role
+      role: user.role,
     });
 
     res.status(200).json({
@@ -202,7 +215,7 @@ const getAllUsers = async (req, res) => {
     if (req.user.role !== UserRoles.ADMIN) {
       return res.status(403).json({
         status: "error",
-        message: "Unauthorized: Admin access required"
+        message: "Unauthorized: Admin access required",
       });
     }
 
@@ -211,11 +224,11 @@ const getAllUsers = async (req, res) => {
     const filters = {
       role: req.query.role,
       status: req.query.status,
-      search: req.query.search
+      search: req.query.search,
     };
-    
+
     const userData = await userModel.getAllUsers(filters, page, limit);
-    
+
     res.status(200).json({
       status: "success",
       data: userData,
@@ -234,7 +247,7 @@ const getUser = async (req, res) => {
     if (req.user.role !== UserRoles.ADMIN) {
       return res.status(403).json({
         status: "error",
-        message: "Unauthorized: Admin access required"
+        message: "Unauthorized: Admin access required",
       });
     }
 
@@ -260,7 +273,9 @@ const updateProfile = async (req, res) => {
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      logger.warn(`${logContext} - Validation errors`, { errors: errors.array() });
+      logger.warn(`${logContext} - Validation errors`, {
+        errors: errors.array(),
+      });
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
@@ -277,7 +292,11 @@ const updateProfile = async (req, res) => {
       updates.profilePhoto = req.file;
     }
 
-    const user = await userModel.updateUser(req.user.id, updates, req.user.role);
+    const user = await userModel.updateUser(
+      req.user.id,
+      updates,
+      req.user.role
+    );
 
     logger.info(`${logContext} - Profile updated successfully`);
 
@@ -303,7 +322,7 @@ const updateUser = async (req, res) => {
     if (req.user.role !== UserRoles.ADMIN) {
       return res.status(403).json({
         status: "error",
-        message: "Unauthorized: Admin access required"
+        message: "Unauthorized: Admin access required",
       });
     }
 
@@ -320,10 +339,14 @@ const updateUser = async (req, res) => {
       phoneNumber: req.body.phoneNumber,
       email: req.body.email,
       role: req.body.role,
-      status: req.body.status
+      status: req.body.status,
     };
 
-    const user = await userModel.updateUser(req.params.userId, updates, req.user.role);
+    const user = await userModel.updateUser(
+      req.params.userId,
+      updates,
+      req.user.role
+    );
 
     res.status(200).json({
       status: "success",
@@ -379,9 +402,9 @@ const deleteAccount = async (req, res) => {
 
   try {
     logger.info(`${logContext} - Attempting account deletion`);
-    
+
     await userModel.deleteUser(req.user.id, req.user.role);
-    
+
     logger.info(`${logContext} - Account deleted successfully`);
 
     res.status(200).json({
@@ -407,14 +430,14 @@ const deleteUser = async (req, res) => {
     if (req.user.role !== UserRoles.ADMIN) {
       return res.status(403).json({
         status: "error",
-        message: "Unauthorized: Admin access required"
+        message: "Unauthorized: Admin access required",
       });
     }
 
     logger.info(`${logContext} - Admin attempting to delete user`);
-    
+
     await userModel.deleteUser(req.params.userId, req.user.role);
-    
+
     logger.info(`${logContext} - User deleted successfully`);
 
     res.status(200).json({
@@ -432,6 +455,47 @@ const deleteUser = async (req, res) => {
   }
 };
 
+//for service-service communication in microservices
+const verifyToken = async (req, res) => {
+  const logContext = "verifyToken";
+  try {
+    const { token } = req.body;
+
+    //verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    //check if user exists and has admin prvileges
+
+    const user = await sql`
+    SELECT id, email, role, status, is_super_admin
+    FROM users
+    WHERE id = ${decoded.userId}
+    `;
+    if(!user[0] || user[0].status !== "active"){
+      return res.json({
+        status: "error",
+        isValid: false,
+      });
+    }
+    return res.json({
+      status: "success",
+      isValid: true,
+      isAdmin: user[0].role === UserRoles.ADMIN,
+      is_super_admin: user[0].is_super_admin,
+      userId: user[0].id,
+    })
+  } catch (error) {
+    logger.error(`${logContext} - Token verification failed`, {
+      error: error.message,
+    });
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
+
+  }
+};
+
 module.exports = {
   register,
   registerAdmin,
@@ -445,4 +509,5 @@ module.exports = {
   changePassword,
   deleteAccount,
   deleteUser,
-};  
+  verifyToken
+};

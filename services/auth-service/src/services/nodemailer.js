@@ -6,8 +6,8 @@ class EmailService {
       service: "gmail",
       auth: {
         user: process.env.EMAIL_ACCOUNT || "church.email@gmail.com",
-        pass: process.env.EMAIL_PASSWORD || "app-specific-password" // Replace with app password
-      }
+        pass: process.env.EMAIL_PASSWORD || "app-specific-password", // Replace with app password
+      },
     });
   }
 
@@ -43,21 +43,20 @@ class EmailService {
               <p>Bringing hope and spiritual guidance to the community.</p>
             </footer>
           </div>
-        `
+        `,
       };
 
       console.log("Attempting to send email to:", email);
       const result = await this.transporter.sendMail(mailOptions);
       console.log("Email sent successfully:", {
         messageId: result.messageId,
-        response: result.response
+        response: result.response,
       });
       return true;
-
     } catch (error) {
       console.error("Email sending error:", {
         errorName: error.name,
-        errorMessage: error.message
+        errorMessage: error.message,
       });
       throw error;
     }
