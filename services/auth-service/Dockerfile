@@ -50,6 +50,3 @@ EXPOSE $PORT
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
     CMD wget -q --spider http://localhost:$PORT/health || exit 1
-
-# Start the application
-CMD ["node", "dist/index.js"]
