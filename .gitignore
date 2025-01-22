@@ -72,11 +72,9 @@ kubernetes/secrets.yaml
 *.key
 
 # Debugging tools
-*.log
 debug/
 
 # Miscellaneous
-*.log.*
 *.bak
 *.swp
 
@@ -88,3 +86,7 @@ docs/README_LOCAL.md
 
 # Ignore package-lock files if you're using Yarn (optional)
 package-lock.json
+
+# Ignore npm/yarn debug files (optional)
+npm-debug.log*
+yarn-debug.log*
