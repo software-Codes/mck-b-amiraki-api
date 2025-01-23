@@ -2,9 +2,9 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
 const { initializeDatabaseTables, sql } = require("./config/database");
 const router = require('./routes/authRoutes');
+const announcementRoutes = require('./routes/annoucements/annoucementsRoutes');
 
 const createApp = () => {
   const app = express();
@@ -34,6 +34,8 @@ const createApp = () => {
   const setupRoutes = () => {
     // Auth routes
     app.use('/api/auth', router);
+    // Add announcement routes
+    app.use('/api/announcements', announcementRoutes);
 
 
 
@@ -42,7 +44,10 @@ const createApp = () => {
       res.status(404).json({
         status: "error",
         message: "Route not found",
-        availableRoutes: ["/api/auth/*"],
+        availableRoutes: ["/api/auth/*",
+          "/api/announcements/*"
+
+        ],
       });
     });
   };

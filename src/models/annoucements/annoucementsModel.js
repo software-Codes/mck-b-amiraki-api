@@ -1,7 +1,8 @@
-import { v4 as uuidv4 } from "uuid";
-import AWS from "aws-sdk";
-import Redis from "ioredis";
-import { sql } from "../../config/database.js";
+
+ const AWS = require("aws-sdk");
+  const Redis = require("ioredis");
+  const { sql } = require("../../config/database");
+  const { v4: uuidv4 } = require("uuid");
 
 // AWS S3 Configuration
 const s3 = new AWS.S3({
