@@ -467,7 +467,7 @@ const unpinAnnouncement = async (announcementId, adminId) => {
   }
 };
 // Export modules
-export {
+module.exports = {
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
