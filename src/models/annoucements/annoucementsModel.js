@@ -42,7 +42,7 @@ const uploadToS3 = async (file, prefix = "announcements/") => {
   };
 
   try {
-    const uploaded = await s3.upload(params).promise();
+    const uploaded = await s3.putObject(params).promise();
     return {
       url: uploaded.Location,
       key: uploaded.Key,
