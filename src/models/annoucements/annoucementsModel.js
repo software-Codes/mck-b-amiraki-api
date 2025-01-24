@@ -1,13 +1,18 @@
-
- const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
-  const Redis = require("ioredis");
-  const { sql } = require("../../config/database");
-  const { v4: uuidv4 } = require("uuid");
-  const redisUrl = process.env.REDIS_HOST || "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
+const {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
+const Redis = require("ioredis");
+const { sql } = require("../../config/database");
+const { validate: validateUuid } = require("uuid");
+const redisUrl =
+  process.env.REDIS_HOST ||
+  "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
 
 // AWS S3 Configuration
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION,
+  region: process.env.AWS_REGION || "us-east-1",
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -15,13 +20,13 @@ const s3Client = new S3Client({
 });
 // Redis Caching Configuration
 const redis = new Redis({
-  host: 'redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com',
+  host: "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com",
   port: 10977,
   password: process.env.REDIS_PASSWORD,
 });
 
-redis.on('error', (err) => {
-  console.error('Redis Client Error', err);
+redis.on("error", (err) => {
+  console.error("Redis Client Error", err);
 });
 // Announcement Status Types
 const AnnouncementStatus = {
@@ -85,68 +90,67 @@ const createAnnouncement = async ({
   mediaFiles = [],
 }) => {
   try {
-    // Begin transaction
-    await sql.begin(async (sql) => {
-      // Upload media files to S3
-      const uploadedMedia = await Promise.all(
-        mediaFiles.map(async (file) => {
-          const uploadResult = await uploadToS3(file);
-          return {
-            url: uploadResult.url,
-            key: uploadResult.key,
-            type: file.mimetype.startsWith("image/")
-              ? MediaType.IMAGE
-              : file.mimetype.startsWith("video/")
-              ? MediaType.VIDEO
-              : MediaType.DOCUMENT,
-          };
-        })
-      );
+    // Start transaction
+    const announcementResult = await sql`
+      INSERT INTO announcements (
+        admin_id,
+        title,
+        content,
+        status,
+        created_at,
+        updated_at
+      ) VALUES (
+        ${adminId},
+        ${title},
+        ${content},
+        ${status},
+        NOW(),
+        NOW()
+      ) RETURNING id;
+    `;
 
-      // Insert announcement
-      const announcement = await sql`
-        INSERT INTO announcements (
-          admin_id,
-          title,
-          content,
-          status,
-          created_at,
-          updated_at
-        ) VALUES (
-          ${adminId},
-          ${title},
-          ${content},
-          ${status},
-          NOW(),
-          NOW()
-        ) RETURNING id;
+    const announcementId = announcementResult[0].id;
+
+    // Upload media files to S3
+    const uploadedMedia = await Promise.all(
+      mediaFiles.map(async (file) => {
+        const uploadResult = await uploadToS3(file);
+        return {
+          url: uploadResult.url,
+          key: uploadResult.key,
+          type: file.mimetype.startsWith("image/")
+            ? MediaType.IMAGE
+            : file.mimetype.startsWith("video/")
+            ? MediaType.VIDEO
+            : MediaType.DOCUMENT,
+        };
+      })
+    );
+
+    // Insert media attachments
+    if (uploadedMedia.length > 0) {
+      await sql`
+        INSERT INTO announcement_media (
+          announcement_id,
+          media_url,
+          media_key,
+          media_type
+        ) VALUES ${sql(
+          uploadedMedia.map((media) => [
+            announcementId,
+            media.url,
+            media.key,
+            media.type,
+          ])
+        )}
       `;
+    }
 
-      // Insert media attachments
-      if (uploadedMedia.length > 0) {
-        await sql`
-          INSERT INTO announcement_media (
-            announcement_id,
-            media_url,
-            media_key,
-            media_type
-          ) VALUES ${sql(
-            uploadedMedia.map((media) => [
-              announcement[0].id,
-              media.url,
-              media.key,
-              media.type,
-            ])
-          )}
-        `;
-      }
+    // Invalidate cache
+    await redis.del(`announcements:list`);
+    await redis.del(`announcements:recent`);
 
-      // Invalidate cache
-      await redis.del(`announcements:list`);
-      await redis.del(`announcements:recent`);
-
-      return announcement[0];
-    });
+    return { id: announcementId };
   } catch (error) {
     console.error("Announcement Creation Error:", error);
     throw error;
@@ -252,49 +256,55 @@ const updateAnnouncement = async (
 
 // Delete Announcement
 const deleteAnnouncement = async (announcementId, adminId) => {
+  // Validate UUIDs
+  if (!announcementId || !validateUuid(announcementId)) {
+    throw new Error("Invalid announcement ID");
+  }
+
+  if (!adminId || !validateUuid(adminId)) {
+    throw new Error("Invalid admin ID");
+  }
+
   try {
-    await sql.begin(async (sql) => {
-      // Retrieve and delete media files from S3
-      const mediaToDelete = await sql`
-        SELECT media_key FROM announcement_media 
-        WHERE announcement_id = ${announcementId}
-      `;
+    // Retrieve media files to delete from S3
+    const mediaToDelete = await sql`
+      SELECT media_key FROM announcement_media 
+      WHERE announcement_id = ${announcementId}
+    `;
 
-      // Delete S3 files
-      await Promise.all(
-        mediaToDelete.map((media) => deleteFromS3(media.media_key))
-      );
+    // Delete S3 files
+    await Promise.all(
+      mediaToDelete.map((media) => deleteFromS3(media.media_key))
+    );
 
-      // Delete announcement media entries
-      await sql`
-        DELETE FROM announcement_media 
-        WHERE announcement_id = ${announcementId}
-      `;
+    // Delete announcement media entries
+    await sql`
+      DELETE FROM announcement_media 
+      WHERE announcement_id = ${announcementId}
+    `;
 
-      // Delete announcement
-      const deletedAnnouncement = await sql`
-        DELETE FROM announcements 
-        WHERE id = ${announcementId} AND admin_id = ${adminId}
-        RETURNING id;
-      `;
+    // Delete announcement
+    const deletedAnnouncement = await sql`
+      DELETE FROM announcements 
+      WHERE id = ${announcementId} AND admin_id = ${adminId}
+      RETURNING id;
+    `;
 
-      if (!deletedAnnouncement[0]) {
-        throw new Error("Announcement not found or unauthorized");
-      }
+    if (!deletedAnnouncement[0]) {
+      throw new Error("Announcement not found or unauthorized");
+    }
 
-      // Invalidate cache
-      await redis.del(`announcements:list`);
-      await redis.del(`announcements:recent`);
-      await redis.del(`announcement:${announcementId}`);
+    // Invalidate cache
+    await redis.del(`announcements:list`);
+    await redis.del(`announcements:recent`);
+    await redis.del(`announcement:${announcementId}`);
 
-      return deletedAnnouncement[0];
-    });
+    return deletedAnnouncement[0];
   } catch (error) {
     console.error("Announcement Deletion Error:", error);
     throw error;
   }
 };
-
 // Get Announcements with Caching
 const getAnnouncements = async (
   page = 1,
