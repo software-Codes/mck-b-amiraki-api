@@ -1,32 +1,27 @@
-const {
-  S3Client,
-  PutObjectCommand,
-  DeleteObjectCommand,
-} = require("@aws-sdk/client-s3");
-const Redis = require("ioredis");
-const { sql } = require("../../config/database");
-const { validate: validateUuid } = require("uuid");
-const redisUrl =
-  process.env.REDIS_HOST ||
-  "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
+
+ const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+  const Redis = require("ioredis");
+  const { sql } = require("../../config/database");
+  const { v4: uuidv4 } = require("uuid");
+  const redisUrl = process.env.REDIS_HOST || "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
 
 // AWS S3 Configuration
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.AWS_REGION || 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID, 
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
 });
 // Redis Caching Configuration
 const redis = new Redis({
-  host: "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com",
+  host: 'redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com',
   port: 10977,
   password: process.env.REDIS_PASSWORD,
 });
 
-redis.on("error", (err) => {
-  console.error("Redis Client Error", err);
+redis.on('error', (err) => {
+  console.error('Redis Client Error', err);
 });
 // Announcement Status Types
 const AnnouncementStatus = {
@@ -50,7 +45,7 @@ const uploadToS3 = async (file, prefix = "announcements/") => {
     Key: `${prefix}${uuidv4()}-${file.originalname}`,
     Body: file.buffer,
     ContentType: file.mimetype,
-    ACL: "public-read",
+    // Remove ACL: "public-read"
   };
 
   try {
@@ -256,15 +251,6 @@ const updateAnnouncement = async (
 
 // Delete Announcement
 const deleteAnnouncement = async (announcementId, adminId) => {
-  // Validate UUIDs
-  if (!announcementId || !validateUuid(announcementId)) {
-    throw new Error("Invalid announcement ID");
-  }
-
-  if (!adminId || !validateUuid(adminId)) {
-    throw new Error("Invalid admin ID");
-  }
-
   try {
     // Retrieve media files to delete from S3
     const mediaToDelete = await sql`
@@ -305,6 +291,7 @@ const deleteAnnouncement = async (announcementId, adminId) => {
     throw error;
   }
 };
+
 // Get Announcements with Caching
 const getAnnouncements = async (
   page = 1,
