@@ -1,22 +1,28 @@
 
- const AWS = require("aws-sdk");
+ const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
   const Redis = require("ioredis");
   const { sql } = require("../../config/database");
   const { v4: uuidv4 } = require("uuid");
+  const redisUrl = process.env.REDIS_HOST || "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
 
 // AWS S3 Configuration
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+const s3Client = new S3Client({
   region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
-
 // Redis Caching Configuration
 const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT,
+  host: 'redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com',
+  port: 10977,
+  password: process.env.REDIS_PASSWORD,
 });
 
+redis.on('error', (err) => {
+  console.error('Redis Client Error', err);
+});
 // Announcement Status Types
 const AnnouncementStatus = {
   DRAFT: "draft",
@@ -32,6 +38,7 @@ const MediaType = {
 };
 
 // Function to upload file to AWS S3
+// Replace s3.putObject with:
 const uploadToS3 = async (file, prefix = "announcements/") => {
   const params = {
     Bucket: process.env.AWS_S3_BUCKET,
@@ -42,10 +49,11 @@ const uploadToS3 = async (file, prefix = "announcements/") => {
   };
 
   try {
-    const uploaded = await s3.putObject(params).promise();
+    const command = new PutObjectCommand(params);
+    const response = await s3Client.send(command);
     return {
-      url: uploaded.Location,
-      key: uploaded.Key,
+      url: `https://${params.Bucket}.s3.amazonaws.com/${params.Key}`,
+      key: params.Key,
     };
   } catch (error) {
     console.error("S3 Upload Error:", error);
@@ -61,7 +69,7 @@ const deleteFromS3 = async (fileKey) => {
   };
 
   try {
-    await s3.deleteObject(params).promise();
+    await s3.DeleteObjectCommand(params).promise();
   } catch (error) {
     console.error("S3 Delete Error:", error);
     throw new Error("Failed to delete file from S3");

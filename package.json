@@ -25,9 +25,9 @@
   "license": "ISC",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.734.0",
+    "@aws-sdk/lib-storage": "^3.734.0",
     "@neondatabase/serverless": "^0.10.4",
     "amqplib": "^0.10.5",
-    "aws-sdk": "^2.1692.0",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -45,6 +45,7 @@
     "passport-jwt": "^4.0.1",
     "pg": "^8.13.1",
     "pg-hstore": "^2.3.4",
+    "redis": "^4.7.0",
     "sequelize": "^6.37.5",
     "twilio": "^5.4.2",
     "uuid": "^11.0.5",
