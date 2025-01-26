@@ -85,7 +85,12 @@ const createAnnouncement = async ({
   mediaFiles = [],
 }) => {
   try {
-    // Start transaction
+    // Determine final status
+    const finalStatus = status === AnnouncementStatus.PUBLISHED 
+      ? AnnouncementStatus.PUBLISHED 
+      : AnnouncementStatus.DRAFT;
+
+    // Insert announcement with explicit published_at handling
     const announcementResult = await sql`
       INSERT INTO announcements (
         admin_id,
@@ -93,14 +98,16 @@ const createAnnouncement = async ({
         content,
         status,
         created_at,
-        updated_at
+        updated_at,
+        published_at
       ) VALUES (
         ${adminId},
         ${title},
         ${content},
-        ${status},
+        ${finalStatus},
         NOW(),
-        NOW()
+        NOW(),
+        ${finalStatus === AnnouncementStatus.PUBLISHED ? new Date() : null}
       ) RETURNING id;
     `;
 
@@ -122,7 +129,7 @@ const createAnnouncement = async ({
       })
     );
 
-    // Insert media attachments
+    // Insert media attachments if any
     if (uploadedMedia.length > 0) {
       await sql`
         INSERT INTO announcement_media (
@@ -151,7 +158,6 @@ const createAnnouncement = async ({
     throw error;
   }
 };
-
 // Update Announcement
 const updateAnnouncement = async (
   announcementId,
@@ -300,11 +306,7 @@ const getAnnouncements = async (
 ) => {
   const cacheKey = `announcements:list:${page}:${limit}:${status}`;
 
-  // Try to get from cache first
-  const cachedAnnouncements = await redis.get(cacheKey);
-  if (cachedAnnouncements) {
-    return JSON.parse(cachedAnnouncements);
-  }
+  // Existing caching logic...
 
   try {
     const offset = (page - 1) * limit;
@@ -314,6 +316,7 @@ const getAnnouncements = async (
         a.title, 
         a.content, 
         a.created_at, 
+        a.published_at,  // Add this
         u.full_name as admin_name,
         (
           SELECT json_agg(
@@ -327,8 +330,10 @@ const getAnnouncements = async (
         ) as media
       FROM announcements a
       JOIN users u ON a.admin_id = u.id
-      WHERE a.status = ${status}
-      ORDER BY a.created_at DESC
+      WHERE 
+        a.status = ${status} AND 
+        a.published_at IS NOT NULL  // Ensure only truly published announcements
+      ORDER BY a.published_at DESC  // Sort by published timestamp
       LIMIT ${limit} OFFSET ${offset}
     `;
 
