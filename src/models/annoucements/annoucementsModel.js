@@ -52,6 +52,7 @@ const createAnnouncement = async ({ adminId, title, content }) => {
 };
 
 // Update Announcement (Admins Only)
+// Update Announcement (Admins Only)
 const updateAnnouncement = async (
   announcementId,
   adminId,
@@ -59,20 +60,43 @@ const updateAnnouncement = async (
 ) => {
   try {
     // Validate input
-    if (!title || !content) {
-      throw new Error("Title and content are required");
+    if (title === undefined && content === undefined && status === undefined) {
+      throw new Error("At least one of title, content, or status must be provided");
     }
 
+    // Prepare update conditions dynamically
+    const updateParts = [];
+    const updateValues = {};
+
+    if (title !== undefined) {
+      updateParts.push('title = ${title}');
+      updateValues.title = title;
+    }
+
+    if (content !== undefined) {
+      updateParts.push('content = ${content}');
+      updateValues.content = content;
+    }
+
+    if (status !== undefined) {
+      updateParts.push('status = ${status}');
+      updateValues.status = status;
+
+      // Handle published_at based on status
+      if (status === AnnouncementStatus.PUBLISHED) {
+        updateParts.push('published_at = NOW()');
+      } else {
+        updateParts.push('published_at = NULL');
+      }
+    }
+
+    // Always update updated_at
+    updateParts.push('updated_at = NOW()');
+
+    // Construct the update query
     const result = await sql`
       UPDATE announcements
-      SET 
-        title = ${title},
-        content = ${content},
-        status = ${status},
-        published_at = ${
-          status === AnnouncementStatus.PUBLISHED ? sql`NOW()` : null
-        },
-        updated_at = NOW()
+      SET ${sql(updateParts.join(', '))}
       WHERE id = ${announcementId} AND admin_id = ${adminId}
       RETURNING id, title, content, status, published_at, updated_at;
     `;
@@ -81,11 +105,11 @@ const updateAnnouncement = async (
       throw new Error("Announcement not found or unauthorized to update");
     }
 
-    // Invalidate all cached announcement lists
+    // Invalidate caches
     await redis.del("announcements:list");
-    await redis.del(`announcements:${status}`);
+    await redis.del(`announcements:${result[0].status}`);
 
-    // Publish update event for real-time notification
+    // Publish update event
     await redis.publish("announcements:updated", JSON.stringify(result[0]));
 
     return result[0];

@@ -87,51 +87,37 @@ class AnnouncementController {
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
-  static async update(req, res) {
-    const logContext = "AnnouncementController:Update";
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          status: "error",
-          errors: errors.array(),
+    static async update(req, res) {
+      try {
+        const { id } = req.params;
+        const { title, content, status } = req.body;
+        const adminId = req.user.id;
+  
+        // Remove undefined values
+        const updateData = {};
+        if (title !== undefined) updateData.title = title;
+        if (content !== undefined) updateData.content = content;
+        if (status !== undefined) updateData.status = status;
+  
+        const updatedAnnouncement = await updateAnnouncement(
+          id, 
+          adminId, 
+          updateData
+        );
+  
+        res.status(200).json({
+          status: 'success',
+          data: updatedAnnouncement
+        });
+      } catch (error) {
+        console.error('Update Controller Error:', error);
+        res.status(500).json({
+          status: 'error',
+          message: error.message || 'Failed to update announcement'
         });
       }
-
-      const { id } = req.params;
-      const { title, content, status } = req.body;
-
-      const updatedAnnouncement = await updateAnnouncement(
-        id,
-        req.user.id,
-        { title, content, status }
-      );
-
-      // Clear relevant caches
-      await redis.del(`announcements:list:*`);
-      await redis.del(`announcement:${id}`);
-
-      logger.info(`${logContext} - Announcement updated`, {
-        announcementId: id,
-        adminId: req.user.id,
-      });
-
-      res.status(200).json({
-        status: "success",
-        data: updatedAnnouncement,
-      });
-    } catch (error) {
-      logger.error(`${logContext} - Announcement update failed`, {
-        error: error.message,
-        adminId: req.user.id,
-      });
-      res.status(500).json({
-        status: "error",
-        message: "Failed to update announcement",
-      });
-    }
   }
-
+  
   /**
    * Delete an announcement
    * @param {Object} req - Express request object

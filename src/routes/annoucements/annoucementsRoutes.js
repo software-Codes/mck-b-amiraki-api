@@ -7,6 +7,7 @@ const {
   requireSuperAdmin,
 } = require("../../middleware/authMiddleware");
 const multer = require("multer");
+const { validationResult } = require("express-validator");
 
 // Configure multer for file uploads
 const upload = multer({
@@ -53,23 +54,33 @@ const createAnnouncementValidation = [
 
 // Validation middleware for announcement update
 const updateAnnouncementValidation = [
-  param("id").isInt().withMessage("Invalid announcement ID"),
-  body("title")
+  body('title')
     .optional()
     .trim()
-    .isLength({ min: 3, max: 255 })
-    .withMessage("Title must be between 3 and 255 characters"),
-  body("content")
+    .notEmpty().withMessage('Title cannot be empty')
+    .isLength({ max: 255 }).withMessage('Title is too long'),
+  
+  body('content')
     .optional()
     .trim()
-    .isLength({ min: 10 })
-    .withMessage("Content must be at least 10 characters long"),
-  body("status")
+    .notEmpty().withMessage('Content cannot be empty')
+    .isLength({ min: 10 }).withMessage('Content is too short'),
+  
+  body('status')
     .optional()
-    .isIn(["draft", "published", "archived"])
-    .withMessage("Invalid announcement status"),
-];
+    .isIn(['draft', 'published', 'archived']).withMessage('Invalid status'),
 
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        status: 'error',
+        errors: errors.array()
+      });
+    }
+    next();
+  }
+];
 // Announcement Routes
 announcementRoutes.post(
   "/",
