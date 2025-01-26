@@ -102,9 +102,9 @@ announcementRoutes.get(
   [
     query("page").optional().isInt().toInt(),
     query("limit").optional().isInt().toInt(),
-    query("status").optional().isIn(["draft", "published", "archived"]),
+    query("status").optional().isIn(["draft", "published", "archived", "pinned", "all"]),
   ],
-  AnnouncementController.list
+  AnnouncementController.getAll
 );
 
 announcementRoutes.post(

@@ -47,49 +47,37 @@ class AnnouncementController {
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
-  static async list(req, res) {
-    const logContext = "AnnouncementController:List";
+  static async getAll(req, res) {
     try {
-      const { page = 1, limit = 10, status = AnnouncementStatus.PUBLISHED } = req.query;
-      const cacheKey = `announcements:list:${status}:${page}:${limit}`;
+      const page = parseInt(req.query.page, 10) || 1;
+      const limit = parseInt(req.query.limit, 10) || 10;
+      const status = req.query.status || AnnouncementStatus.PUBLISHED;
 
-      // Try to get cached data first
-      const cachedData = await redis.get(cacheKey);
-      if (cachedData) {
-        return res.status(200).json({
-          status: "success",
-          data: JSON.parse(cachedData),
-          meta: { page: parseInt(page), limit: parseInt(limit), status },
-          fromCache: true,
+      // Validate input
+      if (page < 1 || limit < 1 || limit > 100) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Invalid pagination parameters'
         });
       }
 
-      // If not in cache, fetch from database
-      const announcements = await getAnnouncements(
-        parseInt(page),
-        parseInt(limit),
-        status
-      );
-
-      // Cache the result for 1 hour
-      await redis.setex(cacheKey, 3600, JSON.stringify(announcements));
+      const result = await getAnnouncements(page, limit, status);
 
       res.status(200).json({
-        status: "success",
-        data: announcements,
+        status: 'success',
+        data: result,
         meta: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          status,
-        },
+          page,
+          limit,
+          status
+        }
       });
     } catch (error) {
-      logger.error(`${logContext} - Failed to retrieve announcements`, {
-        error: error.message,
-      });
+      console.error('Fetch Announcements Controller Error:', error);
       res.status(500).json({
-        status: "error",
-        message: "Failed to retrieve announcements",
+        status: 'error',
+        message: 'Failed to fetch announcements',
+        error: error.message
       });
     }
   }

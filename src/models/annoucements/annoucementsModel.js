@@ -3,15 +3,16 @@
 const { S3Client } = require("@aws-sdk/client-s3");
 const Redis = require("ioredis");
 const { sql } = require("../../config/database");
-const redisUrl = process.env.REDIS_HOST || "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
+const redisUrl =
+  process.env.REDIS_HOST ||
+  "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com:10977";
 
 // Redis Configuration
 const redis = new Redis({
-  host: 'redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com',
+  host: "redis-10977.c62.us-east-1-4.ec2.redns.redis-cloud.com",
   port: 10977,
   password: process.env.REDIS_PASSWORD,
-
-})
+});
 
 // Announcement Status
 const AnnouncementStatus = {
@@ -51,25 +52,45 @@ const createAnnouncement = async ({ adminId, title, content }) => {
 };
 
 // Update Announcement (Admins Only)
-const updateAnnouncement = async (announcementId, adminId, { title, content, status }) => {
+const updateAnnouncement = async (
+  announcementId,
+  adminId,
+  { title, content, status }
+) => {
   try {
+    // Validate input
+    if (!title || !content) {
+      throw new Error("Title and content are required");
+    }
+
     const result = await sql`
       UPDATE announcements
       SET 
         title = ${title},
         content = ${content},
         status = ${status},
-        published_at = ${status === AnnouncementStatus.PUBLISHED ? sql`NOW()` : null},
+        published_at = ${
+          status === AnnouncementStatus.PUBLISHED ? sql`NOW()` : null
+        },
         updated_at = NOW()
       WHERE id = ${announcementId} AND admin_id = ${adminId}
-      RETURNING id;
+      RETURNING id, title, content, status, published_at, updated_at;
     `;
 
-    if (!result[0]) throw new Error("Announcement not found or unauthorized");
+    if (!result[0]) {
+      throw new Error("Announcement not found or unauthorized to update");
+    }
+
+    // Invalidate all cached announcement lists
     await redis.del("announcements:list");
+    await redis.del(`announcements:${status}`);
+
+    // Publish update event for real-time notification
+    await redis.publish("announcements:updated", JSON.stringify(result[0]));
+
     return result[0];
   } catch (error) {
-    console.error("Update Error:", error);
+    console.error("Update Announcement Error:", error);
     throw error;
   }
 };
@@ -80,22 +101,44 @@ const deleteAnnouncement = async (announcementId, adminId) => {
     const result = await sql`
       DELETE FROM announcements 
       WHERE id = ${announcementId} AND admin_id = ${adminId}
-      RETURNING id;
+      RETURNING id, status;
     `;
 
-    if (!result[0]) throw new Error("Announcement not found");
+    if (!result[0]) {
+      throw new Error("Announcement not found or unauthorized to delete");
+    }
+
+    // Invalidate caches
     await redis.del("announcements:list");
+    await redis.del(`announcements:${result[0].status}`);
+
+    // Publish delete event for real-time notification
+    await redis.publish(
+      "announcements:deleted",
+      JSON.stringify({
+        id: announcementId,
+        status: result[0].status,
+      })
+    );
+
     return result[0];
   } catch (error) {
-    console.error("Deletion Error:", error);
+    console.error("Delete Announcement Error:", error);
     throw error;
   }
 };
 
 // Get Announcements (All Users)
-const getAnnouncements = async (page = 1, limit = 10, status = AnnouncementStatus.PUBLISHED) => {
+const getAnnouncements = async (
+  page = 1,
+  limit = 10,
+  status = AnnouncementStatus.PUBLISHED
+) => {
   const offset = (page - 1) * limit;
+  const cacheKey = `announcements:${status}:${page}:${limit}`;
+
   try {
+    // Fetch announcements with comprehensive data
     const announcements = await sql`
       SELECT 
         a.id, 
@@ -111,11 +154,32 @@ const getAnnouncements = async (page = 1, limit = 10, status = AnnouncementStatu
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    // Cache for 1 hour
-    await redis.setex(`announcements:${status}:${page}:${limit}`, 3600, JSON.stringify(announcements));
-    return announcements;
+    // Count total published announcements
+    const [countResult] = await sql`
+      SELECT COUNT(*) as total 
+      FROM announcements 
+      WHERE status = ${status}
+    `;
+
+    const totalAnnouncements = parseInt(countResult.total, 10);
+    const totalPages = Math.ceil(totalAnnouncements / limit);
+
+    const result = {
+      announcements,
+      pagination: {
+        currentPage: page,
+        totalPages: totalPages,
+        totalAnnouncements: totalAnnouncements,
+        limit: limit,
+      },
+    };
+
+    // Cache the result with appropriate expiration
+    await redis.setex(cacheKey, 3600, JSON.stringify(result));
+
+    return result;
   } catch (error) {
-    console.error("Fetch Error:", error);
+    console.error("Fetch Announcements Error:", error);
     throw error;
   }
 };
@@ -154,6 +218,33 @@ const unpinAnnouncement = async (announcementId, adminId) => {
     throw error;
   }
 };
+// Real-time Announcement Subscription (for WebSocket or Server-Sent Events)
+const subscribeToAnnouncements = (callback) => {
+  const redisSubscriber = new Redis({
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD,
+  });
+
+  redisSubscriber.subscribe("announcements:updated", "announcements:deleted");
+
+  redisSubscriber.on("message", (channel, message) => {
+    try {
+      const data = JSON.parse(message);
+      callback(channel, data);
+    } catch (error) {
+      console.error("Subscription parsing error:", error);
+    }
+  });
+
+  return () => {
+    redisSubscriber.unsubscribe(
+      "announcements:updated",
+      "announcements:deleted"
+    );
+    redisSubscriber.quit();
+  };
+};
 
 module.exports = {
   createAnnouncement,
@@ -163,4 +254,5 @@ module.exports = {
   pinAnnouncement,
   unpinAnnouncement,
   AnnouncementStatus,
+  subscribeToAnnouncements,
 };
