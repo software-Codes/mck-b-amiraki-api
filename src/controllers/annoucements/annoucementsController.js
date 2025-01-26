@@ -10,6 +10,7 @@ const {
 } = require("../../models/annoucements/annoucementsModel");
 const logger = require("../../config/logger");
 const { validationResult } = require("express-validator");
+const redis = require("../../config/redis");
 
 class AnnouncementController {
   /**
@@ -18,46 +19,77 @@ class AnnouncementController {
    * @param {Object} res - Express response object
    */
   static async create(req, res) {
-    const logContext = "AnnouncementController:Create";
     try {
-      // Validate request body
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          status: "error",
-          errors: errors.array(),
+      const { title, content } = req.body;
+      const adminId = req.user.id;  // Assuming authenticated admin
+  
+      const announcement = await createAnnouncement({
+        adminId,
+        title,
+        content
+      });
+  
+      res.status(201).json({
+        message: "Announcement published successfully",
+        announcementId: announcement.id,
+
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        message: "Failed to publish announcement",
+        error: error.message 
+      });
+    }
+  };
+
+  /**
+   * Retrieve announcements with pagination and caching
+   * @param {Object} req - Express request object
+   * @param {Object} res - Express response object
+   */
+  static async list(req, res) {
+    const logContext = "AnnouncementController:List";
+    try {
+      const { page = 1, limit = 10, status = AnnouncementStatus.PUBLISHED } = req.query;
+      const cacheKey = `announcements:list:${status}:${page}:${limit}`;
+
+      // Try to get cached data first
+      const cachedData = await redis.get(cacheKey);
+      if (cachedData) {
+        return res.status(200).json({
+          status: "success",
+          data: JSON.parse(cachedData),
+          meta: { page: parseInt(page), limit: parseInt(limit), status },
+          fromCache: true,
         });
       }
 
-      const { title, content, status } = req.body;
-      const mediaFiles = req.files || [];
+      // If not in cache, fetch from database
+      const announcements = await getAnnouncements(
+        parseInt(page),
+        parseInt(limit),
+        status
+      );
 
-      // Create announcement
-      const announcement = await createAnnouncement({
-        adminId: req.user.id,
-        title,
-        content,
-        status: status || AnnouncementStatus.DRAFT,
-        mediaFiles,
-      });
+      // Cache the result for 1 hour
+      await redis.setex(cacheKey, 3600, JSON.stringify(announcements));
 
-      logger.info(`${logContext} - Announcement created`, {
-        announcementId: announcement.id,
-        adminId: req.user.id,
-      });
-
-      res.status(201).json({
+      res.status(200).json({
         status: "success",
-        data: announcement,
+        data: announcements,
+        meta: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          status,
+        },
       });
     } catch (error) {
-      logger.error(`${logContext} - Announcement creation failed`, {
+      logger.error(`${logContext} - Failed to retrieve announcements`, {
         error: error.message,
-        adminId: req.user.id,
       });
       res.status(500).json({
         status: "error",
-        message: "Failed to create announcement",
+        message: "Failed to retrieve announcements",
       });
     }
   }
@@ -70,7 +102,6 @@ class AnnouncementController {
   static async update(req, res) {
     const logContext = "AnnouncementController:Update";
     try {
-      // Validate request body
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
@@ -81,15 +112,16 @@ class AnnouncementController {
 
       const { id } = req.params;
       const { title, content, status } = req.body;
-      const newMediaFiles = req.files || [];
 
-      // Update announcement
       const updatedAnnouncement = await updateAnnouncement(
         id,
         req.user.id,
-        { title, content, status },
-        newMediaFiles
+        { title, content, status }
       );
+
+      // Clear relevant caches
+      await redis.del(`announcements:list:*`);
+      await redis.del(`announcement:${id}`);
 
       logger.info(`${logContext} - Announcement updated`, {
         announcementId: id,
@@ -121,9 +153,11 @@ class AnnouncementController {
     const logContext = "AnnouncementController:Delete";
     try {
       const { id } = req.params;
-
-      // Delete announcement
       await deleteAnnouncement(id, req.user.id);
+
+      // Clear relevant caches
+      await redis.del(`announcements:list:*`);
+      await redis.del(`announcement:${id}`);
 
       logger.info(`${logContext} - Announcement deleted`, {
         announcementId: id,
@@ -147,42 +181,29 @@ class AnnouncementController {
   }
 
   /**
-   * Retrieve announcements with pagination
+   * Cleanup old announcements
    * @param {Object} req - Express request object
    * @param {Object} res - Express response object
    */
-  static async list(req, res) {
-    const logContext = "AnnouncementController:List";
+  static async cleanup(req, res) {
+    const logContext = "AnnouncementController:Cleanup";
     try {
-      const {
-        page = 1,
-        limit = 10,
-        status = AnnouncementStatus.PUBLISHED,
-      } = req.query;
+      const { retentionDays = 14, status = AnnouncementStatus.PUBLISHED } = req.body;
+      const cleanupResult = await cleanupOldAnnouncements({ retentionDays, status });
 
-      // Retrieve announcements
-      const announcements = await getAnnouncements(
-        parseInt(page),
-        parseInt(limit),
-        status
-      );
+      // Clear relevant caches
+      await redis.del(`announcements:list:${status}:*`);
 
+      logger.info(`${logContext} - Cleanup completed`, cleanupResult);
       res.status(200).json({
         status: "success",
-        data: announcements,
-        meta: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          status,
-        },
+        data: cleanupResult,
       });
     } catch (error) {
-      logger.error(`${logContext} - Failed to retrieve announcements`, {
-        error: error.message,
-      });
+      logger.error(`${logContext} - Cleanup failed`, { error: error.message });
       res.status(500).json({
         status: "error",
-        message: "Failed to retrieve announcements",
+        message: "Failed to cleanup announcements",
       });
     }
   }
@@ -255,42 +276,6 @@ class AnnouncementController {
     }
   }
 
-  /**
-   * Cleanup old announcements
-   * @param {Object} req - Express request object
-   * @param {Object} res - Express response object
-   */
-  static async cleanup(req, res) {
-    const logContext = "AnnouncementController:Cleanup";
-    try {
-      const { retentionDays = 14, status = AnnouncementStatus.PUBLISHED } =
-        req.body;
-
-      // Cleanup old announcements
-      const cleanupResult = await cleanupOldAnnouncements({
-        retentionDays,
-        status,
-      });
-
-      logger.info(
-        `${logContext} - Announcements cleanup completed`,
-        cleanupResult
-      );
-
-      res.status(200).json({
-        status: "success",
-        data: cleanupResult,
-      });
-    } catch (error) {
-      logger.error(`${logContext} - Failed to cleanup announcements`, {
-        error: error.message,
-      });
-      res.status(500).json({
-        status: "error",
-        message: "Failed to cleanup old announcements",
-      });
-    }
-  }
 }
 
 module.exports = AnnouncementController;
