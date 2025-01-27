@@ -5,8 +5,8 @@ class EmailService {
     this.transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user: process.env.EMAIL_ACCOUNT || "church.email@gmail.com",
-        pass: process.env.EMAIL_PASSWORD || "app-specific-password", // Replace with app password
+        user: process.env.EMAIL_ACCOUNT || "collinsentrepreneur@gmail.com",
+        pass: process.env.EMAIL_PASSWORD || "ewpk ofve yoyo nhhn",
       },
     });
   }

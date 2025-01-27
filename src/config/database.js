@@ -291,9 +291,48 @@ const createAnnouncementsTable = async () => {
     console.error("Error creating announcements table:", error.message);
   }
 };
+const createSuggestionsTable = async () => {
+  try {
+    // Create table
+    await sql(`
+      CREATE TABLE IF NOT EXISTS suggestions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'implemented', 'rejected')),
+        admin_response TEXT,
+        is_anonymous BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        reviewed_at TIMESTAMP WITH TIME ZONE,
+        reviewed_by UUID,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES users(id)
+      );
+    `);
+
+    // Create an index on user_id for faster lookups
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON suggestions(user_id);
+    `);
+
+    // Create an index on status for filtering in admin dashboard
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status);
+    `);
+
+    console.log("Suggestions table created successfully");
+  } catch (error) {
+    console.error("Error creating suggestions table:", error.message);
+  }
+};
+
+
 
 const initializeDatabaseTables = async () => {
   try {
+
     await createEnumTypes();
     await createUsersTable();
     await createPaymentsTable();
@@ -302,6 +341,7 @@ const initializeDatabaseTables = async () => {
     await createStatementsTable();
     await createViews();
     await createAnnouncementsTable();
+    await createSuggestionsTable();
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);
@@ -318,5 +358,6 @@ module.exports = {
   createPaymentSummariesTable,
   createStatementsTable,
   createViews,
-  createEnumTypes
-};  ``
+  createEnumTypes,
+  createSuggestionsTable
+};  
