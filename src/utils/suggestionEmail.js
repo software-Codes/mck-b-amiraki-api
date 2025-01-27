@@ -45,9 +45,46 @@ const emailTemplates = {
       `
     })
   };
+ 
+// Main send email function
+export const sendEmail = async ({ to, template, data, subject, html }) => {
+    try {
+      // Validate email address
+      if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+        throw new Error('Invalid email address');
+      }
+  
+      let emailContent;
+      if (template && data) {
+        // Use template if provided
+        if (!emailTemplates[template]) {
+          throw new Error('Invalid email template');
+        }
+        emailContent = emailTemplates[template](data);
+      } else {
+        // Use direct subject and html if provided
+        emailContent = { subject, html };
+      }
+  
+      // Send email
+      const info = await transporter.sendMail({
+        from: process.env.SMTP_FROM || '"Church App" "collinsentrepreneur@gmail.com"',
+        to,
+        subject: emailContent.subject,
+        html: emailContent.html,
+      });
+  
+      console.log('Email sent successfully:', info.messageId);
+      return { success: true, messageId: info.messageId };
+  
+    } catch (error) {
+      console.error('Error sending email:', error);
+      throw new Error(`Failed to send email: ${error.message}`);
+    }
+  };
   
   // Utility function to send suggestion notifications to all admins
-export const notifyAdmins = async (suggestion, adminEmails) => {
+  export const notifyAdmins = async (suggestion, adminEmails) => {
     try {
       const emailPromises = adminEmails.map(email => 
         sendEmail({
