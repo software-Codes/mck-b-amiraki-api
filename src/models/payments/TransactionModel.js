@@ -64,3 +64,5 @@ class TransactionModel {
     };
   }
 }
+
+module.exports = TransactionModel;
