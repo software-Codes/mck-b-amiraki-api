@@ -319,4 +319,4 @@ module.exports = {
   createStatementsTable,
   createViews,
   createEnumTypes
-};  
+};  ``

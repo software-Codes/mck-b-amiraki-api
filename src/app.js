@@ -11,7 +11,7 @@ const createApp = () => {
   const server = http.createServer(app);
 
 
-  // Initialize database tables
+  // // Initialize database tables
   initializeDatabaseTables();
 
   // Middleware setup
