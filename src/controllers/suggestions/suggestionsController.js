@@ -1,7 +1,5 @@
-const {
-  getSuggestionById,
-  SuggestionModel,
-} = require("../../models/suggestions/suggestions");
+const { SuggestionModel } = require("../../models/suggestions/suggestions");
+const ValidationHelpers = require("../../utils/validationHelpers");
 
 /**
  * @namespace SuggestionController
@@ -18,14 +16,17 @@ const SuggestionController = {
       const { id: userId } = req.user;
       const { title, description, isAnonymous = false } = req.body;
 
-      // Validate required fields
-      const missingFields = [];
-      if (!title) missingFields.push("title");
-      if (!description) missingFields.push("description");
-      if (missingFields.length > 0) {
+      const validation = ValidationHelpers.validateSuggestionParams({
+        title,
+        description,
+        isAnonymous,
+      });
+
+      if (!validation.valid) {
         return res.status(400).json({
           success: false,
-          message: `Missing required fields: ${missingFields.join(", ")}`,
+          message: "Invalid suggestion parameters",
+          errors: validation.errors,
         });
       }
 
@@ -42,14 +43,7 @@ const SuggestionController = {
         data: suggestion,
       });
     } catch (error) {
-      this.handleError(res, error, {
-        validation: 400,
-        notFound: 404,
-        default: 500,
-        custom: {
-          "Unauthorized to delete this suggestion": 403,
-        },
-      });
+      this.handleError(res, error);
     }
   },
 
@@ -64,11 +58,32 @@ const SuggestionController = {
       const { status, adminResponse } = req.body;
       const { id: adminId, role } = req.user;
 
+      // Validate UUID format
+      if (!ValidationHelpers.isValidUUID(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid suggestion ID format",
+        });
+      }
+
       // Authorization check
       if (!["admin", "super_admin"].includes(role)) {
         return res.status(403).json({
           success: false,
           message: "Unauthorized: Admin privileges required",
+        });
+      }
+
+      const validation = ValidationHelpers.validateAdminResponse({
+        message: adminResponse,
+        status,
+      });
+
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid update parameters",
+          errors: validation.errors,
         });
       }
 
@@ -85,13 +100,10 @@ const SuggestionController = {
         data: updatedSuggestion,
       });
     } catch (error) {
-      this.handleError(res, error, {
-        validation: 400,
-        notFound: 404,
-        default: 500,
-      });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Get paginated suggestions for a user
    * @route GET /api/suggestions/user
@@ -102,8 +114,10 @@ const SuggestionController = {
       const { id: userId } = req.user;
       const { page = 1, limit = 20 } = req.query;
 
-      // Validate pagination parameters
-      const validation = validateRequestParams({ page, limit });
+      const validation = ValidationHelpers.validateRequestParams({
+        page,
+        limit,
+      });
       if (!validation.valid) {
         return res.status(400).json({
           success: false,
@@ -125,13 +139,14 @@ const SuggestionController = {
           total: result.total,
           page: parseInt(page),
           limit: parseInt(limit),
-          totalPages: Math.ceil(result.total / limit),
+          totalPages: Math.ceil(result.total / parseInt(limit)),
         },
       });
     } catch (error) {
-      this.handleError(res, error, { default: 500 });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Get single suggestion by ID
    * @route GET /api/suggestions/:id
@@ -140,6 +155,14 @@ const SuggestionController = {
   async getSuggestionById(req, res) {
     try {
       const { id } = req.params;
+
+      if (!ValidationHelpers.isValidUUID(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid suggestion ID format",
+        });
+      }
+
       const suggestion = await SuggestionModel.getSuggestionById(id);
 
       if (!suggestion) {
@@ -149,7 +172,7 @@ const SuggestionController = {
         });
       }
 
-      // Hide user email if anonymous
+      // Hide user information if anonymous
       if (suggestion.is_anonymous) {
         delete suggestion.user_email;
         delete suggestion.user_name;
@@ -160,12 +183,10 @@ const SuggestionController = {
         data: suggestion,
       });
     } catch (error) {
-      this.handleError(res, error, {
-        notFound: 404,
-        default: 500,
-      });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Delete a suggestion
    * @route DELETE /api/suggestions/:id
@@ -175,6 +196,13 @@ const SuggestionController = {
     try {
       const { id: userId } = req.user;
       const { id: suggestionId } = req.params;
+
+      if (!ValidationHelpers.isValidUUID(suggestionId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid suggestion ID format",
+        });
+      }
 
       const deletedSuggestion = await SuggestionModel.deleteSuggestion(
         suggestionId,
@@ -187,15 +215,10 @@ const SuggestionController = {
         data: deletedSuggestion,
       });
     } catch (error) {
-      this.handleError(res, error, {
-        notFound: 404,
-        custom: {
-          "Unauthorized to delete this suggestion": 403,
-        },
-        default: 500,
-      });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Send direct response to user (Admin only)
    * @route POST /api/suggestions/:id/response
@@ -207,10 +230,30 @@ const SuggestionController = {
       const { message, statusUpdate } = req.body;
       const { id: adminId, role } = req.user;
 
+      if (!ValidationHelpers.isValidUUID(suggestionId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid suggestion ID format",
+        });
+      }
+
       if (!["admin", "super_admin"].includes(role)) {
         return res.status(403).json({
           success: false,
           message: "Unauthorized: Admin privileges required",
+        });
+      }
+
+      const validation = ValidationHelpers.validateAdminResponse({
+        message,
+        status: statusUpdate ? "reviewed" : undefined,
+      });
+
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid response parameters",
+          errors: validation.errors,
         });
       }
 
@@ -227,13 +270,10 @@ const SuggestionController = {
         data: updated,
       });
     } catch (error) {
-      this.handleError(res, error, {
-        notFound: 404,
-        validation: 400,
-        default: 500,
-      });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Get all suggestions with filters (Admin only)
    * @route GET /api/suggestions
@@ -243,8 +283,12 @@ const SuggestionController = {
     try {
       const { page = 1, limit = 20, ...filters } = req.query;
 
-      // Validate pagination and filters
-      const validation = validateRequestParams({ page, limit, ...filters });
+      const validation = ValidationHelpers.validateRequestParams({
+        page,
+        limit,
+        ...filters,
+      });
+
       if (!validation.valid) {
         return res.status(400).json({
           success: false,
@@ -266,41 +310,42 @@ const SuggestionController = {
           total: result.total,
           page: parseInt(page),
           limit: parseInt(limit),
-          totalPages: Math.ceil(result.total / limit),
+          totalPages: Math.ceil(result.total / parseInt(limit)),
           filters,
         },
       });
     } catch (error) {
-      this.handleError(res, error, { default: 500 });
+      this.handleError(res, error);
     }
   },
+
   /**
    * @desc Unified error handler for suggestion routes
    * @param {Object} res - Express response object
    * @param {Error} error - Thrown error
-   * @param {Object} statusMap - HTTP status code mappings
    */
-  handleError(res, error, statusMap = {}) {
+  handleError(res, error) {
     console.error(`SuggestionController Error: ${error.message}`);
 
-    const statusCodes = {
-      ...statusMap,
+    const errorMap = {
       "Suggestion not found": 404,
-      "Unauthorized access": 403,
+      "Unauthorized to delete this suggestion": 403,
+      "Unauthorized: Admin privileges required": 403,
+      "Database operation failed": 500,
     };
 
-    const message = error.message;
-    const statusCode =
-      statusCodes[message] ||
-      statusMap[error.constructor.name] ||
-      statusMap.default ||
-      500;
+    const statusCode = errorMap[error.message] || 500;
+    const message =
+      statusCode === 500 && process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : error.message;
 
     const response = {
       success: false,
-      message: statusCode === 500 ? "Internal server error" : message,
+      message,
     };
 
+    // Include error details in non-production environments
     if (process.env.NODE_ENV !== "production") {
       response.error = {
         message: error.message,

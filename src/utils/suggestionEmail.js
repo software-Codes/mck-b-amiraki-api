@@ -98,7 +98,7 @@ const emailTemplates = {
 };
 
 // Main send email function
-export const sendEmail = async ({ to, template, data, subject, html }) => {
+const sendEmail = async ({ to, template, data, subject, html }) => {
   try {
     // Validate email address
     if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
@@ -135,7 +135,7 @@ export const sendEmail = async ({ to, template, data, subject, html }) => {
 };
 
 // Utility function to send suggestion notifications to all admins
-export const notifyAdmins = async (suggestion, adminEmails) => {
+const notifyAdmins = async (suggestion, adminEmails) => {
   try {
     const emailPromises = adminEmails.map((email) =>
       sendEmail({
@@ -154,7 +154,7 @@ export const notifyAdmins = async (suggestion, adminEmails) => {
 };
 
 // Utility function to notify user of suggestion update
-export const notifyUser = async (suggestion, userEmail, userName) => {
+ const notifyUser = async (suggestion, userEmail, userName) => {
   try {
     await sendEmail({
       to: userEmail,
@@ -170,3 +170,9 @@ export const notifyUser = async (suggestion, userEmail, userName) => {
     throw new Error("Failed to notify user");
   }
 };
+
+module.exports = {
+  sendEmail,
+  notifyAdmins,
+  notifyUser,
+}
