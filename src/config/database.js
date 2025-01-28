@@ -12,30 +12,37 @@ const createEnumTypes = async () => {
           CREATE TYPE auth_provider AS ENUM ('manual', 'google');
         END IF;
       END $$;`,
-      
+
       `DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'content_type') THEN
           CREATE TYPE content_type AS ENUM ('text', 'image', 'video', 'audio');
         END IF;
       END $$;`,
-      
+
       `DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status') THEN
           CREATE TYPE payment_status AS ENUM ('PENDING', 'COMPLETED', 'FAILED', 'CANCELLED');
         END IF;
       END $$;`,
-      
+
       `DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_purpose') THEN
           CREATE TYPE payment_purpose AS ENUM ('TITHE', 'OFFERING', 'SPECIAL_OFFERING', 'DEVELOPMENT_FUND');
         END IF;
       END $$;`,
-      
+
       `DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notification_type') THEN
           CREATE TYPE notification_type AS ENUM ('PAYMENT_SUCCESS', 'PAYMENT_FAILED', 'SYSTEM_ALERT', 'RECEIPT');
         END IF;
-      END $$;`
+      END $$;`,
+      `
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_status') THEN
+          CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected');
+        END IF;
+      END $$;
+    `
     ];
 
     for (const command of enumCommands) {
@@ -96,7 +103,7 @@ const createPaymentsTable = async () => {
       "CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);",
       "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);",
       "CREATE INDEX IF NOT EXISTS idx_payments_purpose ON payments(purpose);",
-      "CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date);"
+      "CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date);",
     ];
 
     for (const command of indexCommands) {
@@ -107,7 +114,6 @@ const createPaymentsTable = async () => {
     console.error("Error creating payments table:", error.message);
   }
 };
-
 
 const createNotificationsTable = async () => {
   try {
@@ -300,27 +306,50 @@ const createSuggestionsTable = async () => {
         user_id UUID NOT NULL,
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
-        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'implemented', 'rejected')),
+        status suggestion_status DEFAULT 'pending',
         admin_response TEXT,
         is_anonymous BOOLEAN DEFAULT false,
+        reviewed_by UUID,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         reviewed_at TIMESTAMP WITH TIME ZONE,
-        reviewed_by UUID,
+        deleted_at TIMESTAMP WITH TIME ZONE,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (reviewed_by) REFERENCES users(id)
       );
     `);
 
-    // Create an index on user_id for faster lookups
+    // Create indexes separately
     await sql(`
       CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON suggestions(user_id);
     `);
 
-    // Create an index on status for filtering in admin dashboard
     await sql(`
       CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status);
     `);
+
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at);
+    `);
+
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestions_reviewed_at ON suggestions(reviewed_at);
+    `);
+
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestions_deleted ON suggestions(deleted_at);
+    `);
+
+    // Only create GIN index if pg_trgm extension is available
+    try {
+      await sql(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+      await sql(`
+        CREATE INDEX IF NOT EXISTS idx_suggestions_response 
+        ON suggestions USING GIN(admin_response gin_trgm_ops);
+      `);
+    } catch (error) {
+      console.warn("pg_trgm extension not available, skipping GIN index creation");
+    }
 
     console.log("Suggestions table created successfully");
   } catch (error) {
@@ -329,10 +358,8 @@ const createSuggestionsTable = async () => {
 };
 
 
-
 const initializeDatabaseTables = async () => {
   try {
-
     await createEnumTypes();
     await createUsersTable();
     await createPaymentsTable();
@@ -359,5 +386,5 @@ module.exports = {
   createStatementsTable,
   createViews,
   createEnumTypes,
-  createSuggestionsTable
-};  
+  createSuggestionsTable,
+};
