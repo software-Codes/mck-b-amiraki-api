@@ -3,32 +3,23 @@ const { authMiddleware, requireAdmin } = require('../../middleware/authMiddlewar
 const SuggestionController = require('../../controllers/suggestions/suggestionsController');
 const router = express.Router();
 
-// Route groups
-const publicRoutes = () => {
-  // Public routes (no auth required)
-  router.get('/:id', SuggestionController.getSuggestionById);
-};
+// Public routes (no authentication required)
+router.get('/:id', SuggestionController.getSuggestionById);
 
-const authenticatedRoutes = () => {
-  router.use(authMiddleware);
-  
-  // User routes (auth required)
-  router.post('/', SuggestionController.createSuggestion);
-  router.get('/user', SuggestionController.getUserSuggestions);
-  router.delete('/:id', SuggestionController.deleteSuggestion);
-};
+// User routes (require authentication)
+router.use(authMiddleware); // Apply authMiddleware to all routes below
+router.post('/', SuggestionController.createSuggestion);
+router.get('/user', SuggestionController.getUserSuggestions);
+router.delete('/:id', SuggestionController.deleteSuggestion);
 
-const adminRoutes = () => {
-  // Admin only routes
-  router.use(requireAdmin(["admin", "super_admin"]));
-  router.get("/", SuggestionController.getAllSuggestions);
-  router.put("/:id", SuggestionController.updateSuggestion);
-  router.post("/:id/response", SuggestionController.sendDirectResponse);
-};
+// Admin routes (require admin privileges)
+const adminRouter = express.Router();
+adminRouter.use(requireAdmin); // Apply requireAdmin middleware to all admin routes
+adminRouter.get('/', SuggestionController.getAllSuggestions);
+adminRouter.put('/:id', SuggestionController.updateSuggestion);
+adminRouter.post('/:id/response', SuggestionController.sendDirectResponse);
 
-// Initialize routes
-publicRoutes();
-authenticatedRoutes();
-adminRoutes();
+// Mount admin routes under /admin
+router.use('/admin', adminRouter);
 
-module.exports = suggestionsRoutes;
+module.exports = router;
