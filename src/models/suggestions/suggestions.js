@@ -22,11 +22,11 @@ class SuggestionModel {
    * @returns {Promise<Object>} Created suggestion
    */
   static async createSuggestion({
-    userId,
-    title,
-    description,
-    isAnonymous = false,
-  }) {
+                                  userId,
+                                  title,
+                                  description,
+                                  isAnonymous = false,
+                                }) {
     try {
       // Validate input lengths
       this.validateTitle(title);
@@ -36,16 +36,21 @@ class SuggestionModel {
         INSERT INTO suggestions(
           user_id, title, description, is_anonymous
         ) VALUES(
-          ${userId}, ${title}, ${description}, ${isAnonymous}
-        ) RETURNING *
+                  ${userId}, ${title}, ${description}, ${isAnonymous}
+                ) RETURNING *
       `;
 
+      // Check if result exists and has rows
+      if (!result || !Array.isArray(result)) {
+        throw new Error('Invalid database response');
+      }
+
       // Fire-and-forget email notifications
-      this.handlePostCreationEmails(result.rows[0], userId, isAnonymous).catch(
-        (error) => console.error("Email notification failed:", error)
+      this.handlePostCreationEmails(result[0], userId, isAnonymous).catch(
+          (error) => console.error("Email notification failed:", error)
       );
 
-      return result.rows[0];
+      return result[0];
     } catch (error) {
       throw this.handleDatabaseError(error, "creating suggestion");
     }
