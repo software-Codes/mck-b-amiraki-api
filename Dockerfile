@@ -1,52 +1,22 @@
-# Build stage
-FROM node:22.2.0-bullseye as builder
+# Specify the base image
+FROM node:20.11  
+# Set the working directory in the container
+WORKDIR /app
 
-# Create app directory
-WORKDIR /usr/src/app
+# Install nodemon globally
+RUN npm install -g nodemon
 
-# Copy package files
+# Copy package.json and package-lock.json to leverage Docker cache
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install project dependencies
+RUN npm install
 
-# Copy source code
+# Bundle app source inside Docker image
 COPY . .
 
-# Build the application
-RUN npm run build
+# Your app binds to port 3000 so you'll use the EXPOSE instruction to have it mapped by the docker daemon
+EXPOSE 3000
 
-# Production stage
-FROM node:22.2.0-bullseye-slim
-
-# Install necessary production dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create app directory
-WORKDIR /usr/src/app
-
-# Create a non-root user
-RUN groupadd -r nodejs && useradd -r -g nodejs nodejs
-
-# Copy built assets from builder stage
-COPY --from=builder --chown=nodejs:nodejs /usr/src/app/dist ./dist
-COPY --from=builder --chown=nodejs:nodejs /usr/src/app/package*.json ./
-
-# Install production dependencies only
-RUN npm ci --only=production
-
-# Set environment variables
-ENV NODE_ENV=production \
-    PORT=3000
-
-# Switch to non-root user
-USER nodejs
-
-# Expose the port the app runs on
-EXPOSE $PORT
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-    CMD wget -q --spider http://localhost:$PORT/health || exit 1
+# Define the command to run your app using CMD which defines your runtime
+CMD ["npm", "run", "dev"]
