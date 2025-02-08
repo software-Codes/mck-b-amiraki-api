@@ -66,7 +66,7 @@ const registerAdmin = async (req, res) => {
         errors: errors.array(),
       });
       return res.status(400).json({
-        status: "error",
+        success: false,  // Changed from status to success
         errors: errors.array(),
       });
     }
@@ -87,17 +87,16 @@ const registerAdmin = async (req, res) => {
       `${logContext} - Admin registered and verification email sent`,
       {
         adminId: admin.id,
-        adminEmail: email, // Use email from request body
+        adminEmail: email,
       }
     );
 
     res.status(201).json({
-      status: "success",
-      message:
-        "Admin registration initiated. Please check your email for verification code",
+      success: true,  // Changed from status to success
+      message: "Admin registration initiated. Please check your email for verification code",
       data: {
         id: admin.id,
-        email: email, // Use email from request body
+        email: email,
         status: "pending",
       },
     });
@@ -106,7 +105,7 @@ const registerAdmin = async (req, res) => {
       error: error.message,
     });
     res.status(400).json({
-      status: "error",
+      success: false,  // Changed from status to success
       message: error.message,
     });
   }
