@@ -1,7 +1,7 @@
 const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const emailService = require('../services/nodemailer');
+const emailService = require("../services/nodemailer");
 //generate 6-code verification code
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -138,14 +138,14 @@ const createAdmin = async ({
     // Send verification code
     await emailService.sendVerificationCode(email, verificationCode);
 
-    return admin[0];  // Return the first row of the result
+    return admin[0]; // Return the first row of the result
   } catch (error) {
     if (error.code === "23505") {
       throw new Error("Email or phone number already exists");
     }
     throw error;
   }
-};  
+};
 // Verify admin account
 const verifyAdminAccount = async (email, verificationCode) => {
   try {
@@ -168,8 +168,8 @@ const verifyAdminAccount = async (email, verificationCode) => {
     if (admin[0].verification_code !== verificationCode) {
       throw new Error("Invalid verification code");
     }
-        // Activate admin account
-        const verifiedAdmin = await sql`
+    // Activate admin account
+    const verifiedAdmin = await sql`
         UPDATE users
         SET 
           status = 'active',
@@ -179,13 +179,12 @@ const verifyAdminAccount = async (email, verificationCode) => {
         WHERE id = ${admin[0].id}
         RETURNING id, full_name, email, phone_number, role, status;
       `;
-  
-      return verifiedAdmin[0];
-    } catch (error) {
-      throw error;
-    }
-  };
-  
+
+    return verifiedAdmin[0];
+  } catch (error) {
+    throw error;
+  }
+};
 
 // Enhanced login with role-based token generation
 const loginUser = async (email, password) => {
@@ -205,19 +204,24 @@ const loginUser = async (email, password) => {
       throw new Error("Invalid email or password");
     }
 
-    // Update last login timestamp
+    // Clear any previous token invalidation timestamp
     await sql`
       UPDATE users
-      SET last_login = NOW()
+      SET 
+        last_login = NOW(),
+        token_invalidated_at = null
       WHERE id = ${user[0].id};
     `;
 
-    // Generate role-based token
+    const issuedAt = Math.floor(Date.now() / 1000);
+    
+    // Generate role-based token with issued timestamp
     const token = jwt.sign(
       {
         userId: user[0].id,
         email: user[0].email,
         role: user[0].role,
+        iat: issuedAt
       },
       process.env.JWT_SECRET,
       { expiresIn: user[0].role === UserRoles.ADMIN ? "12h" : "24h" }
@@ -232,7 +236,6 @@ const loginUser = async (email, password) => {
     throw error;
   }
 };
-
 // Get user by ID (with role check)
 const getUserById = async (userId, requestingUserRole) => {
   const user = await sql`
@@ -425,7 +428,73 @@ const deleteUser = async (userId) => {
     throw error;
   }
 };
+// Logout user and manage token invalidation
+const logoutUser = async (userId) => {
+  try {
+    // First, verify the user exists
+    const user = await sql`
+      SELECT id FROM users WHERE id = ${userId}
+    `;
 
+    if (!user || user.length === 0) {
+      throw new Error('User not found');
+    }
+
+    // Generate a new token invalidation timestamp
+    const tokenInvalidationTimestamp = new Date();
+
+    // Update the user's logout status and token invalidation timestamp
+    const result = await sql`
+      UPDATE users
+      SET 
+        last_logout = NOW(),
+        token_invalidated_at = ${tokenInvalidationTimestamp}
+      WHERE id = ${userId}
+      RETURNING id, last_logout, token_invalidated_at;
+    `;
+
+    if (!result || result.length === 0) {
+      throw new Error('Failed to update user logout status');
+    }
+
+    return {
+      success: true,
+      message: "Logout successful",
+      userId: result[0].id,
+      logoutTimestamp: result[0].last_logout,
+      tokenInvalidatedAt: result[0].token_invalidated_at
+    };
+  } catch (error) {
+    throw new Error(`Failed to log out user: ${error.message}`);
+  }
+};
+
+
+// Add this function to verify token validity against logout timestamp
+const verifyTokenValidity = async (userId, tokenIssuedAt) => {
+  try {
+    const user = await sql`
+      SELECT token_invalidated_at
+      FROM users
+      WHERE id = ${userId}
+    `;
+
+    if (!user || user.length === 0) {
+      return false;
+    }
+
+    // If there's no invalidation timestamp, token is valid
+    if (!user[0].token_invalidated_at) {
+      return true;
+    }
+
+    // Check if token was issued before the invalidation timestamp
+    const tokenDate = new Date(tokenIssuedAt * 1000); // Convert Unix timestamp to Date
+    return tokenDate > user[0].token_invalidated_at;
+  } catch (error) {
+    throw new Error(`Failed to verify token validity: ${error.message}`);
+  }
+};
 module.exports = {
   UserRoles,
   createUser,
@@ -437,4 +506,6 @@ module.exports = {
   updateUser,
   updatePassword,
   deleteUser,
+  logoutUser,
+  verifyTokenValidity
 };

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const userController = require("../controllers/authController");
+const {authenticate } = require("../middleware/authenticate");
 const {
   authMiddleware,
   requireAdmin,
@@ -64,6 +65,8 @@ router.post(
   userController.register
 );
 router.post("/login", userController.login);
+//handle logout
+router.post("/logout", authMiddleware, requireActive, userController.logout);
 
 // Admin registration routes
 router.post(
@@ -101,7 +104,7 @@ router.put("/users/:userId", requireAdmin, userController.updateUser);
 
 // Updated delete user route to support both admin and self-deletion
 router.delete("/users/:userId", userController.deleteUser);
-
+//
 // Super admin only routes
 router.post(
   "/create-admin",

@@ -7,10 +7,25 @@ const { initializeDatabaseTables } = require("./config/database");
 const authRoutes = require('./routes/authRoutes');
 const announcementRoutes = require('./routes/annoucements/annoucementsRoutes');
 const suggestionRoutes = require('./routes/suggestions/suggestionsRoutes');
+const session = require('express-session');
+const cookieParser = require('cookie-parser');
 
 const createApp = () => {
   const app = express();
   const server = http.createServer(app);
+
+
+  app.use(cookieParser());
+app.use(session({
+  secret: process.env.JWT_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: 'strict'
+  }
+}));
 
   // Middleware setup
   const setupMiddleware = () => {

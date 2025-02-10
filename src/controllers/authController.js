@@ -171,6 +171,14 @@ const login = async (req, res) => {
     const { email, password } = req.body;
     const { user, token } = await userModel.loginUser(email, password);
 
+    // Set token in HTTP-only cookie for additional security
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: user.role === UserRoles.ADMIN ? 12 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000 // 12h or 24h
+    });
+
     logger.info(`${logContext} - Login successful`, {
       userId: user.id,
       role: user.role,
@@ -179,7 +187,10 @@ const login = async (req, res) => {
     res.status(200).json({
       status: "success",
       message: "Login successful",
-      data: { user, token },
+      data: { 
+        user,
+        sessionExpiry: new Date(Date.now() + (user.role === UserRoles.ADMIN ? 12 : 24) * 60 * 60 * 1000)
+      },
     });
   } catch (error) {
     logger.error(`${logContext} - Login failed`, {
@@ -464,42 +475,124 @@ const deleteUser = async (req, res) => {
 
 //for service-service communication in microservices
 const verifyToken = async (req, res) => {
-  const logContext = "verifyToken";
+  const logContext = "UserController.verifyToken";
+  
   try {
     const { token } = req.body;
 
-    //verify token
+    if (!token) {
+      return res.status(400).json({
+        status: "error",
+        message: "Token is required"
+      });
+    }
+
+    // Verify token and check validity
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const isTokenValid = await userModel.verifyTokenValidity(decoded.userId, decoded.iat);
 
-    //check if user exists and has admin prvileges
-
-    const user = await sql`
-    SELECT id, email, role, status, is_super_admin
-    FROM users
-    WHERE id = ${decoded.userId}
-    `;
-    if(!user[0] || user[0].status !== "active"){
+    if (!isTokenValid) {
       return res.json({
         status: "error",
         isValid: false,
+        message: "Token has been invalidated. Re-authentication required."
       });
     }
+
+    // Check if user exists and has active status
+    const user = await sql`
+      SELECT id, email, role, status, is_super_admin
+      FROM users
+      WHERE id = ${decoded.userId} AND status = 'active'
+    `;
+
+    if (!user[0]) {
+      return res.json({
+        status: "error",
+        isValid: false,
+        message: "User not found or inactive"
+      });
+    }
+
     return res.json({
       status: "success",
       isValid: true,
       isAdmin: user[0].role === UserRoles.ADMIN,
       is_super_admin: user[0].is_super_admin,
-      userId: user[0].id,
-    })
+      userId: user[0].id
+    });
+
   } catch (error) {
     logger.error(`${logContext} - Token verification failed`, {
       error: error.message,
     });
-    res.status(400).json({
+    
+    return res.status(400).json({
       status: "error",
-      message: error.message,
+      isValid: false,
+      message: error.name === 'TokenExpiredError' ? 
+        "Token has expired. Please log in again." : 
+        "Invalid token. Please log in again."
+    });
+  }
+};
+// Logout user
+const logout = async (req, res) => {
+  const logContext = `UserController.logout: ${req.user?.id}`;
+
+  try {
+    // Ensure user is authenticated
+    if (!req.user?.id) {
+      logger.warn(`${logContext} - Logout attempted without authentication`);
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required"
+      });
+    }
+
+    // Perform logout operation
+    const logoutResult = await userModel.logoutUser(req.user.id);
+
+    // Clear authentication cookie
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
     });
 
+    // Invalidate any active sessions in your session store if you're using one
+    if (req.session) {
+      await new Promise((resolve) => {
+        req.session.destroy((err) => {
+          if (err) {
+            logger.error(`${logContext} - Session destruction failed`, { error: err.message });
+          }
+          resolve();
+        });
+      });
+    }
+
+    logger.info(`${logContext} - User logged out successfully`, {
+      userId: req.user.id,
+      timestamp: logoutResult.logoutTimestamp
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: "Logout successful. Please log in again to continue.",
+      timestamp: logoutResult.logoutTimestamp
+    });
+
+  } catch (error) {
+    logger.error(`${logContext} - Logout failed`, {
+      error: error.message,
+      userId: req.user?.id
+    });
+
+    res.status(500).json({
+      status: "error",
+      message: "An error occurred during logout. Please try again."
+    });
   }
 };
 
@@ -516,5 +609,6 @@ module.exports = {
   changePassword,
   deleteAccount,
   deleteUser,
-  verifyToken
+  verifyToken,
+  logout
 };
