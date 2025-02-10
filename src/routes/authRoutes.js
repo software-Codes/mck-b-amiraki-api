@@ -85,20 +85,22 @@ router.use(authMiddleware, requireActive);
 router.get("/profile", userController.getProfile);
 router.put(
   "/profile",
-  authMiddleware,
-  requireActive,
   updateProfileValidation,
   upload.single("profilePhoto"),
   userController.updateProfile
 );
 router.put("/change-password", userController.changePassword);
-router.delete("/account", userController.deleteAccount);
+
+// Self-account deletion route
+router.delete("/account", userController.deleteUser);
 
 // Admin routes
 router.get("/users", requireAdmin, userController.getAllUsers);
 router.get("/users/:userId", requireAdmin, userController.getUser);
 router.put("/users/:userId", requireAdmin, userController.updateUser);
-router.delete("/users/:userId", requireAdmin, userController.deleteUser);
+
+// Updated delete user route to support both admin and self-deletion
+router.delete("/users/:userId", userController.deleteUser);
 
 // Super admin only routes
 router.post(
@@ -125,7 +127,7 @@ router.use((error, req, res, next) => {
   next();
 });
 
-//handling the service-service communication
+// Handling service-to-service communication
 router.post("/verify-token", serviceAuthMiddleware, userController.verifyToken);
 
 module.exports = router;

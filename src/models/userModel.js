@@ -394,33 +394,37 @@ const updatePassword = async (userId, currentPassword, newPassword) => {
 };
 
 // Delete user (self or admin)
-const deleteUser = async (userId, requestingUserRole) => {
-  // Prevent admins from being deleted unless by another admin
-  const isAdmin = await sql`
-    SELECT role FROM users WHERE id = ${userId}
-  `;
-  if (isAdmin.length === 0) {
-    throw new Error("User not found");
-  }
-  
-  if (isAdmin[0].role === UserRoles.ADMIN && requestingUserRole !== UserRoles.ADMIN) {
-    throw new Error("Unauthorized: Only admins can delete admin accounts");
-  }
+const deleteUser = async (userId) => {
+  try {
+    // Verify the user exists
+    const userToDelete = await sql`
+      SELECT id FROM users WHERE id = ${userId}
+    `;
 
-  // Proceed to delete the user
-  const result = await sql`
-    DELETE FROM users
-    WHERE id = ${userId}
-    RETURNING id;
-  `;
+    if (!userToDelete[0]) {
+      throw new Error("User not found");
+    }
 
-  if (!result[0]) {
-    throw new Error("User not found");
+    // Proceed to delete the user
+    const result = await sql`
+      DELETE FROM users
+      WHERE id = ${userId}
+      RETURNING id;
+    `;
+
+    if (!result[0]) {
+      throw new Error("User deletion failed");
+    }
+
+    return {
+      success: true,
+      message: "User account successfully deleted",
+      deletedUserId: result[0].id,
+    };
+  } catch (error) {
+    throw error;
   }
-
-  return result[0];
 };
-
 
 module.exports = {
   UserRoles,

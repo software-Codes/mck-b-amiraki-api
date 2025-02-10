@@ -421,38 +421,46 @@ const deleteAccount = async (req, res) => {
   }
 };
 
-// Delete user (admin only)
+// Delete user (admin or self)
 const deleteUser = async (req, res) => {
-  const logContext = `UserController.deleteUser: ${req.params.userId}`;
+  const userIdToDelete = req.user.id;
+  const logContext = `UserController.deleteUser: ${userIdToDelete}`;
 
   try {
-    if (req.user.role !== UserRoles.ADMIN) {
-      return res.status(403).json({
-        status: "error",
-        message: "Unauthorized: Admin access required",
-      });
-    }
+    // Log the deletion attempt
+    logger.info(`${logContext} - User deletion attempt`, {
+      requestingUserId: req.user.id,
+      requestingUserRole: req.user.role
+    });
 
-    logger.info(`${logContext} - Admin attempting to delete user`);
+    // Delete the logged-in user without checking additional permissions
+    const deletionResult = await userModel.deleteUser(userIdToDelete);
 
-    await userModel.deleteUser(req.params.userId, req.user.role);
+    // Log successful deletion
+    logger.info(`${logContext} - User deleted successfully`, {
+      deletedUserId: deletionResult.deletedUserId
+    });
 
-    logger.info(`${logContext} - User deleted successfully`);
-
+    // Return success response
     res.status(200).json({
       status: "success",
-      message: "User deleted successfully",
+      message: "User account deleted successfully",
     });
   } catch (error) {
+    // Log deletion failure
     logger.error(`${logContext} - User deletion failed`, {
       error: error.message,
+      requestingUserId: req.user.id,
+      requestingUserRole: req.user.role
     });
+
     res.status(400).json({
       status: "error",
       message: error.message,
     });
   }
 };
+
 
 //for service-service communication in microservices
 const verifyToken = async (req, res) => {
