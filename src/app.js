@@ -2,55 +2,60 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
-const compression = require('compression');
-const { initializeDatabaseTables } = require("./config/database");
-const authRoutes = require('./routes/authRoutes');
-const announcementRoutes = require('./routes/annoucements/annoucementsRoutes');
-const suggestionRoutes = require('./routes/suggestions/suggestionsRoutes');
-const session = require('express-session');
-const cookieParser = require('cookie-parser');
+const compression = require("compression");
+// const { initializeDatabaseTables } = require("./config/database");
+const authRoutes = require("./routes/authRoutes");
+const announcementRoutes = require("./routes/annoucements/annoucementsRoutes");
+const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
+const session = require("express-session");
+const cookieParser = require("cookie-parser");
 
 const createApp = () => {
   const app = express();
   const server = http.createServer(app);
 
-
   app.use(cookieParser());
-app.use(session({
-  secret: process.env.JWT_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    sameSite: 'strict'
-  }
-}));
+  app.use(
+    session({
+      secret: process.env.JWT_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      cookie: {
+        secure: process.env.NODE_ENV === "production",
+        httpOnly: true,
+        sameSite: "strict",
+      },
+    })
+  );
 
   // Middleware setup
   const setupMiddleware = () => {
     // CORS configuration
-    app.use(cors({
-      origin: process.env.CORS_ORIGIN || "*",
-      methods: ["GET", "POST", "PUT", "DELETE"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-      credentials: true,
-      maxAge: 86400 // CORS preflight cache - 24 hours
-    }));
+    app.use(
+      cors({
+        origin: process.env.CORS_ORIGIN || "*",
+        methods: ["GET", "POST", "PUT", "DELETE"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+        credentials: true,
+        maxAge: 86400, // CORS preflight cache - 24 hours
+      })
+    );
 
     // Security and parsing middleware
-    app.use(helmet({
-      contentSecurityPolicy: process.env.NODE_ENV === 'production',
-      crossOriginEmbedderPolicy: process.env.NODE_ENV === 'production'
-    }));
+    app.use(
+      helmet({
+        contentSecurityPolicy: process.env.NODE_ENV === "production",
+        crossOriginEmbedderPolicy: process.env.NODE_ENV === "production",
+      })
+    );
     app.use(compression()); // Compress responses
-    app.use(express.json({ limit: '10mb' })); // Limit JSON payload size
-    app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+    app.use(express.json({ limit: "10mb" })); // Limit JSON payload size
+    app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
     // Request logging in development
-    if (process.env.NODE_ENV === 'development') {
-      const morgan = require('morgan');
-      app.use(morgan('dev'));
+    if (process.env.NODE_ENV === "development") {
+      const morgan = require("morgan");
+      app.use(morgan("dev"));
     }
   };
 
@@ -58,9 +63,9 @@ app.use(session({
   const setupRoutes = () => {
     // API routes
     const apiRoutes = [
-      { path: '/api/auth', router: authRoutes },
-      { path: '/api/announcements', router: announcementRoutes },
-      { path: '/api/suggestions', router: suggestionRoutes }
+      { path: "/api/auth", router: authRoutes },
+      { path: "/api/announcements", router: announcementRoutes },
+      { path: "/api/suggestions", router: suggestionRoutes },
     ];
 
     // Register all API routes
@@ -69,20 +74,20 @@ app.use(session({
     });
 
     // Health check endpoint
-    app.get('/health', (req, res) => {
-      res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    app.get("/health", (req, res) => {
+      res.json({ status: "healthy", timestamp: new Date().toISOString() });
     });
 
     // API documentation endpoint
-    app.get('/api', (req, res) => {
+    app.get("/api", (req, res) => {
       res.json({
-        version: '1.0',
+        version: "1.0",
         availableRoutes: {
-          auth: '/api/auth/*',
-          announcements: '/api/announcements/*',
-          suggestions: '/api/suggestions/*'
+          auth: "/api/auth/*",
+          announcements: "/api/announcements/*",
+          suggestions: "/api/suggestions/*",
         },
-        documentation: process.env.API_DOCS_URL || 'Documentation URL not set'
+        documentation: process.env.API_DOCS_URL || "Documentation URL not set",
       });
     });
 
@@ -94,9 +99,9 @@ app.use(session({
         availableRoutes: [
           "/api/auth/*",
           "/api/announcements/*",
-          "/api/suggestions/*"
+          "/api/suggestions/*",
         ],
-        suggestion: "Check the API documentation at /api for more information"
+        suggestion: "Check the API documentation at /api for more information",
       });
     });
   };
@@ -105,26 +110,27 @@ app.use(session({
   const setupErrorHandler = () => {
     app.use((err, req, res, next) => {
       // Log error details
-      console.error('Unhandled Error:', {
+      console.error("Unhandled Error:", {
         timestamp: new Date().toISOString(),
         path: req.path,
         method: req.method,
         error: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
       });
 
       // Send appropriate response
       const statusCode = err.status || 500;
       res.status(statusCode).json({
         status: "error",
-        message: process.env.NODE_ENV === 'development' 
-          ? err.message 
-          : 'Internal server error',
-        ...(process.env.NODE_ENV === 'development' && {
+        message:
+          process.env.NODE_ENV === "development"
+            ? err.message
+            : "Internal server error",
+        ...(process.env.NODE_ENV === "development" && {
           stack: err.stack,
           path: req.path,
-          method: req.method
-        })
+          method: req.method,
+        }),
       });
     });
   };
@@ -132,19 +138,19 @@ app.use(session({
   // Initialize app
   const initialize = async () => {
     try {
-      await initializeDatabaseTables();
+      await // initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();
 
       // Log successful initialization in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('Application initialized successfully');
+      if (process.env.NODE_ENV === "development") {
+        console.log("Application initialized successfully");
       }
 
       return app;
     } catch (error) {
-      console.error('Failed to initialize application:', error);
+      console.error("Failed to initialize application:", error);
       throw error;
     }
   };
