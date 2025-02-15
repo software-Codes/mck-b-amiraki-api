@@ -357,9 +357,59 @@ const createSuggestionsTable = async () => {
   }
 };
 
+const createMediaContentsTable = async () => {
+  try {
+    // Create the content_type enum type if it doesn't exist
+    await sql(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'content_type') THEN
+          CREATE TYPE content_type AS ENUM ('text', 'image', 'video', 'audio');
+        END IF;
+      END $$;
+    `);
+
+    // Create the media_contents table
+    await sql(`
+      CREATE TABLE IF NOT EXISTS media_contents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        title VARCHAR(255) NOT NULL,
+        description TEXT NOT NULL,
+        content_type content_type NOT NULL,
+        url TEXT NOT NULL,
+        thumbnail_url TEXT,
+        uploaded_by UUID NOT NULL REFERENCES users(id),
+        size BIGINT NOT NULL,
+        duration INTEGER,
+        views_count INTEGER DEFAULT 0,
+        deleted_at TIMESTAMP WITH TIME ZONE,
+        deleted_by UUID REFERENCES users(id),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+
+    // Create indexes for media_contents table
+    const indexCommands = [
+      "CREATE INDEX IF NOT EXISTS idx_media_contents_uploaded_by ON media_contents(uploaded_by);",
+      "CREATE INDEX IF NOT EXISTS idx_media_contents_content_type ON media_contents(content_type);",
+      "CREATE INDEX IF NOT EXISTS idx_media_contents_created_at ON media_contents(created_at);"
+    ];
+
+    for (const command of indexCommands) {
+      await sql(command);
+    }
+
+    console.log("Media contents table created successfully");
+  } catch (error) {
+    console.error("Error creating media contents table:", error.message);
+  }
+};
+
+
 
 const initializeDatabaseTables = async () => {
   try {
+
     await createEnumTypes();
     await createUsersTable();
     await createPaymentsTable();
@@ -369,6 +419,7 @@ const initializeDatabaseTables = async () => {
     await createViews();
     await createAnnouncementsTable();
     await createSuggestionsTable();
+    await createMediaContentsTable();
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);
@@ -387,4 +438,5 @@ module.exports = {
   createViews,
   createEnumTypes,
   createSuggestionsTable,
+  createMediaContentsTable
 };

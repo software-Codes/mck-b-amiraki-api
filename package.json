@@ -26,6 +26,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.734.0",
     "@aws-sdk/lib-storage": "^3.734.0",
+    "@azure/storage-blob": "^12.26.0",
     "@neondatabase/serverless": "^0.10.4",
     "amqplib": "^0.10.5",
     "axios": "^1.7.9",
