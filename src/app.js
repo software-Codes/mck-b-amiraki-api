@@ -3,12 +3,13 @@ const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
-// const { initializeDatabaseTables } = require("./config/database");
+const { initializeDatabaseTables } = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const announcementRoutes = require("./routes/annoucements/annoucementsRoutes");
 const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
+const mediaContentRoutes  = require("./routes/churchgallery/mediaContent");
 
 const createApp = () => {
   const app = express();
@@ -66,6 +67,7 @@ const createApp = () => {
       { path: "/api/auth", router: authRoutes },
       { path: "/api/announcements", router: announcementRoutes },
       { path: "/api/suggestions", router: suggestionRoutes },
+      { path: "/api/media", router: mediaContentRoutes },
     ];
 
     // Register all API routes
@@ -86,6 +88,7 @@ const createApp = () => {
           auth: "/api/auth/*",
           announcements: "/api/announcements/*",
           suggestions: "/api/suggestions/*",
+          media: "/api/media/*",
         },
         documentation: process.env.API_DOCS_URL || "Documentation URL not set",
       });
@@ -100,6 +103,7 @@ const createApp = () => {
           "/api/auth/*",
           "/api/announcements/*",
           "/api/suggestions/*",
+          "/api/media/*",
         ],
         suggestion: "Check the API documentation at /api for more information",
       });
@@ -138,7 +142,8 @@ const createApp = () => {
   // Initialize app
   const initialize = async () => {
     try {
-      await // initializeDatabaseTables();
+      await 
+      initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();

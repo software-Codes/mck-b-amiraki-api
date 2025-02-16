@@ -100,38 +100,8 @@ class MediaContent {
   }
 }
 
-// middleware/azureStorage.js
-const { BlobServiceClient } = require("@azure/storage-blob");
-const { v4: uuidv4 } = require("uuid");
+module.exports = MediaContent;
 
-class AzureStorageService {
-  constructor() {
-    this.blobServiceClient = BlobServiceClient.fromConnectionString(
-      process.env.AZURE_STORAGE_CONNECTION_STRING
-    );
-    this.containerClient = this.blobServiceClient.getContainerClient(
-      process.env.AZURE_STORAGE_CONTAINER
-    );
-  }
 
-  async uploadFile(file, contentType) {
-    const extension = file.originalname.split(".").pop();
-    const blobName = `${contentType}/${uuidv4()}.${extension}`;
-    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
 
-    const options = {
-      blobHTTPHeaders: {
-        blobContentType: file.mimetype,
-      },
-    };
 
-    await blockBlobClient.uploadData(file.buffer, options);
-    return blockBlobClient.url;
-  }
-
-  async deleteFile(url) {
-    const blobName = url.split("/").pop();
-    const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
-    await blockBlobClient.delete();
-  }
-}
