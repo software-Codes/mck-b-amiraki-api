@@ -8,40 +8,49 @@ const { RedisService } = require("../../models/churchgallery/redisCache");
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
+
+// Configure file filter
 const fileFilter = (req, file, cb) => {
   const allowedTypes = {
     image: ["image/jpeg", "image/png", "image/gif"],
     video: ["video/mp4", "video/mpeg", "video/quicktime"],
   };
 
-  // Determine content type from actual file mimetype
   const contentType = file.mimetype.startsWith("image/") ? "image" : "video";
 
   if (allowedTypes[contentType]?.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Invalid file type"), false);
+    cb(new Error(`Invalid file type: ${file.mimetype}`), false);
   }
 };
 
+// Configure multer upload
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB
   fileFilter,
-}).single("file"); // Ensure this matches client's field name
+}).array("mediaFiles", 50); // Allow up to 50 files per request
 
 // Initialize services
 const azureStorageService = new AzureStorageService();
 const redisService = new RedisService();
-
 class MediaContentController {
-  static async uploadContent(req, res) {
+  static async uploadMultipleContent(req, res) {
     try {
       // Handle file upload
       await new Promise((resolve, reject) => {
         upload(req, res, (err) => {
-          if (err) reject(new Error(`Upload error: ${err.message}`));
-          else resolve();
+          if (err) {
+            if (err.code === "LIMIT_UNEXPECTED_FILE") {
+              reject(
+                new Error('The field name for files should be "mediaFiles"')
+              );
+            } else {
+              reject(new Error(`Upload error: ${err.message}`));
+            }
+          } else {
+            resolve();
+          }
         });
       });
 
@@ -51,49 +60,103 @@ class MediaContentController {
         return res.status(400).json({ errors: errors.array() });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
       }
 
-      // Determine content type from mimetype
-      const contentType = req.file.mimetype.startsWith('image/') ? 'image' : 'video';
+      // Process each file
+      const uploadResults = await Promise.allSettled(
+        req.files.map(async (file, index) => {
+          try {
+            const contentType = file.mimetype.startsWith("image/")
+              ? "image"
+              : "video";
+            const url = await azureStorageService.uploadFile(file, contentType);
 
-      // Upload to Azure
-      const url = await azureStorageService.uploadFile(req.file, contentType);
+            let thumbnailUrl = null;
+            if (contentType === "video" && req.body.thumbnails?.[index]) {
+              const thumbnailBuffer = Buffer.from(
+                req.body.thumbnails[index],
+                "base64"
+              );
+              thumbnailUrl = await azureStorageService.uploadFile(
+                {
+                  buffer: thumbnailBuffer,
+                  mimetype: "image/jpeg",
+                  originalname: `thumbnail-${Date.now()}.jpg`,
+                },
+                "thumbnails"
+              );
+            }
 
-      // Handle thumbnail
-      let thumbnailUrl = null;
-      if (contentType === "video" && req.body.thumbnailBase64) {
-        const thumbnailBuffer = Buffer.from(req.body.thumbnailBase64, 'base64');
-        thumbnailUrl = await azureStorageService.uploadFile(
-          {
-            buffer: thumbnailBuffer,
-            mimetype: "image/jpeg",
-            originalname: `thumbnail-${Date.now()}.jpg`
-          },
-          "thumbnails"
-        );
+            // Create database record
+            const mediaContent = await MediaContent.create({
+              title: Array.isArray(req.body.titles)
+                ? req.body.titles[index]
+                : `Upload ${index + 1}`,
+              description: Array.isArray(req.body.descriptions)
+                ? req.body.descriptions[index]
+                : "",
+              contentType,
+              url,
+              thumbnailUrl,
+              uploadedBy: req.user.id,
+              size: file.size,
+            });
+
+            return {
+              success: true,
+              data: mediaContent,
+              originalName: file.originalname,
+            };
+          } catch (error) {
+            return {
+              success: false,
+              error: error.message,
+              originalName: file.originalname,
+            };
+          }
+        })
+      );
+
+      // Invalidate cache after successful uploads
+      try {
+        await redisService.invalidate("media:list:*");
+      } catch (cacheError) {
+        console.warn("Cache invalidation failed:", cacheError);
       }
 
-      // Create database record without duration requirement
-      const mediaContent = await MediaContent.create({
-        title: req.body.title,
-        description: req.body.description,
-        contentType,
-        url,
-        thumbnailUrl,
-        uploadedBy: req.user.id,
-        size: req.file.size,
-        // Duration is now optional and defaults to null
+      // Process results
+      const successfulUploads = uploadResults
+        .filter(
+          (result) => result.status === "fulfilled" && result.value.success
+        )
+        .map((result) => result.value.data);
+
+      const failedUploads = uploadResults
+        .filter(
+          (result) => result.status === "rejected" || !result.value.success
+        )
+        .map((result) => ({
+          file: result.value?.originalName,
+          error:
+            result.status === "rejected" ? result.reason : result.value.error,
+        }));
+
+      // Send response
+      res.status(207).json({
+        message: "Upload process completed",
+        successful: successfulUploads,
+        failed: failedUploads,
+        totalProcessed: uploadResults.length,
+        successCount: successfulUploads.length,
+        failureCount: failedUploads.length,
       });
-
-      await redisService.invalidate("media:list:*");
-      res.status(201).json(mediaContent);
     } catch (error) {
-      console.error("Failed to upload media content:", error);
-      res.status(500).json({ 
-        error: "Failed to upload media content",
-        details: error.message 
+      console.error("Failed to process multiple uploads:", error);
+      res.status(500).json({
+        error: "Failed to process multiple uploads",
+        details: error.message,
       });
     }
   }

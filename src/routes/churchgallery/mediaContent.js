@@ -16,7 +16,7 @@ router.post(
   "/",
   authMiddleware,
   requireAdmin,
-  MediaContentController.uploadContent
+  MediaContentController.uploadMultipleContent
 
 );
 
@@ -25,7 +25,7 @@ router.post(
  * @desc Get all media content with pagination and filtering
  * @access Public
  */
-router.get("/", MediaContentController.getAllContent, authMiddleware);
+router.get("/",authMiddleware, MediaContentController.getAllContent);
 /**
  * @route GET /api/media/:id
  * @desc Get single media content by ID
