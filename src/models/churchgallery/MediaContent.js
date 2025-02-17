@@ -13,17 +13,17 @@ class MediaContent {
   }) {
     const query = `
       INSERT INTO media_contents (
-        title, 
-        description, 
-        content_type, 
-        url, 
+        title,
+        description,
+        content_type,
+        url,
         thumbnail_url,
         uploaded_by,
         size,
         duration,
         created_at,
         updated_at
-      ) 
+      )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
       RETURNING *
     `;
@@ -100,8 +100,5 @@ class MediaContent {
   }
 }
 
-module.exports = MediaContent;
-
-
-
+module.exports = { MediaContent };
 
