@@ -4,7 +4,6 @@ const MediaContentController = require("../../controllers/churchgallery/mediaCon
 const {
   authMiddleware,
   requireAdmin,
-  requireSuperAdmin,
 } = require("../../middleware/authMiddleware");
 
 /**
@@ -15,9 +14,10 @@ const {
 
 router.post(
   "/",
-  MediaContentController.uploadContent,
   authMiddleware,
-  requireAdmin
+  requireAdmin,
+  MediaContentController.uploadContent
+
 );
 
 /**

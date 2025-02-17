@@ -165,6 +165,7 @@ const login = async (req, res) => {
       return res.status(400).json({
         status: "error",
         errors: errors.array(),
+        token: null,
       });
     }
 
@@ -189,7 +190,8 @@ const login = async (req, res) => {
       message: "Login successful",
       data: { 
         user,
-        sessionExpiry: new Date(Date.now() + (user.role === UserRoles.ADMIN ? 12 : 24) * 60 * 60 * 1000)
+        sessionExpiry: new Date(Date.now() + (user.role === UserRoles.ADMIN ? 12 : 24) * 60 * 60 * 1000),
+        token
       },
     });
   } catch (error) {

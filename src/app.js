@@ -3,7 +3,7 @@ const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
-const { initializeDatabaseTables } = require("./config/database");
+// const { initializeDatabaseTables } = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const announcementRoutes = require("./routes/annoucements/annoucementsRoutes");
 const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
@@ -88,7 +88,7 @@ const createApp = () => {
           auth: "/api/auth/*",
           announcements: "/api/announcements/*",
           suggestions: "/api/suggestions/*",
-          media: "/api/media/*",
+          media: "  *",
         },
         documentation: process.env.API_DOCS_URL || "Documentation URL not set",
       });
@@ -143,7 +143,7 @@ const createApp = () => {
   const initialize = async () => {
     try {
       await 
-      initializeDatabaseTables();
+      // initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();
