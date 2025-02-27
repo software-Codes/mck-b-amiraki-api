@@ -41,8 +41,8 @@ const createEnumTypes = async () => {
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_status') THEN
           CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected');
         END IF;
-      END $$;
-    `
+      END $$; 
+    `,
     ];
 
     for (const command of enumCommands) {
@@ -297,6 +297,43 @@ const createAnnouncementsTable = async () => {
     console.error("Error creating announcements table:", error.message);
   }
 };
+
+const createContactsTable = async () => {
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS contacts (
+        contact_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        contact_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE (user_id, contact_user_id)
+      );
+    `;
+    console.log("Contacts table created successfully");
+  } catch (error) {
+    console.error("Error creating contacts table:", error.message);
+  }
+};
+const createMessagesTable = async () => {
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS messages (
+        message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        media_id UUID REFERENCES media_contents(id),
+        sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        read_at TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `;
+    console.log("Messages table created successfully");
+  } catch (error) {
+    console.error("Error creating messages table:", error.message);
+  }
+};
 const createSuggestionsTable = async () => {
   try {
     // Create table
@@ -348,7 +385,9 @@ const createSuggestionsTable = async () => {
         ON suggestions USING GIN(admin_response gin_trgm_ops);
       `);
     } catch (error) {
-      console.warn("pg_trgm extension not available, skipping GIN index creation");
+      console.warn(
+        "pg_trgm extension not available, skipping GIN index creation"
+      );
     }
 
     console.log("Suggestions table created successfully");
@@ -392,7 +431,7 @@ const createMediaContentsTable = async () => {
     const indexCommands = [
       "CREATE INDEX IF NOT EXISTS idx_media_contents_uploaded_by ON media_contents(uploaded_by);",
       "CREATE INDEX IF NOT EXISTS idx_media_contents_content_type ON media_contents(content_type);",
-      "CREATE INDEX IF NOT EXISTS idx_media_contents_created_at ON media_contents(created_at);"
+      "CREATE INDEX IF NOT EXISTS idx_media_contents_created_at ON media_contents(created_at);",
     ];
 
     for (const command of indexCommands) {
@@ -405,11 +444,8 @@ const createMediaContentsTable = async () => {
   }
 };
 
-
-
 const initializeDatabaseTables = async () => {
   try {
-
     await createEnumTypes();
     await createUsersTable();
     await createPaymentsTable();
@@ -420,6 +456,8 @@ const initializeDatabaseTables = async () => {
     await createAnnouncementsTable();
     await createSuggestionsTable();
     await createMediaContentsTable();
+    await createContactsTable();
+    await createMessagesTable();  
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);
@@ -438,5 +476,7 @@ module.exports = {
   createViews,
   createEnumTypes,
   createSuggestionsTable,
-  createMediaContentsTable
+  createMediaContentsTable,
+  createContactsTable,
+  createMessagesTable,
 };
