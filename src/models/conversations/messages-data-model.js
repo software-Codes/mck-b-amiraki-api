@@ -1,54 +1,347 @@
-const { text } = require("pdfkit");
-const { sql } = require("../../config/database");
-//send new message
-const sendMessage = async (senderId, receiverId, text, mediaId = null) => {
-  try {
-    const message = await sql`
-    INSERT INTO messages (sender_id, receiver_id, text, media_id)
-    VALUES (${senderId}, ${receiverId}, ${text}, ${mediaId})
-    RETURNING *'
-        `;
-    return message[0];
-  } catch (error) {
-    throw new Error("Error Sending message:" + error.message);
-  }
-};
-// Get message history
-const getMessages = async (chatId) => {
-  try {
-    const messages = await sql`
-        SELECT m.*,
-        u.full_name As sender_name
-        FROM messages m
-        JOIN users u ON m.sender_id = u.id
-        WHERE (m.sender_id = ${chatId} OR m.receiver_id = ${chatId} )
-        ORDER_BY m.sent_at ASC
-        `;
-    return messages;
-  } catch (error) {
-    throw new Error("Error Fetching messages: " + error.message);
-  }
-};
+// models/Message.js
 
-// Mark message as read
-const markMessageAsRead = async (messageId, userId) => {
-  try {
-    const result = await sql`
-        UPDATE messages
-        SET read_at = NOW()
-        WHERE message_id = ${messageId}
-        AND receiver_id = ${userId}
-        RETURNING *;
+const { sql } = require("../../config/database");
+const { RedisService } = require("../services/RedisService");
+const redisClient = new RedisService();
+
+class Message {
+  /**
+   * Create a new text message
+   * @param {Object} messageData - Message data
+   * @param {UUID} messageData.sender_id - Sender's user ID
+   * @param {UUID} messageData.receiver_id - Receiver's user ID
+   * @param {string} messageData.text - Message text content
+   * @returns {Object} - Created message
+   */
+  static async createTextMessage(messageData) {
+    try {
+      const { sender_id, receiver_id, text } = messageData;
+
+      // Validate that users are contacts
+      const contactQuery = `
+        SELECT COUNT(*) as contact_exists 
+        FROM contacts 
+        WHERE 
+          (user_id = $1 AND contact_user_id = $2) OR
+          (user_id = $2 AND contact_user_id = $1);
       `;
 
-    return result[0];
-  } catch (error) {
-    throw new Error("Error marking message as read: " + error.message);
-  }
-};
+      const contactResult = await sql(contactQuery, [sender_id, receiver_id]);
 
-module.exports = {
-  sendMessage,
-  getMessages,
-  markMessageAsRead,
-};
+      if (contactResult[0].contact_exists === 0) {
+        throw new Error("Users are not contacts");
+      }
+
+      // Insert message
+      const query = `
+        INSERT INTO messages (
+          sender_id, 
+          receiver_id, 
+          text
+        )
+        VALUES ($1, $2, $3)
+        RETURNING 
+          message_id, 
+          sender_id, 
+          receiver_id, 
+          text, 
+          sent_at,
+          created_at;
+      `;
+
+      const message = await sql(query, [sender_id, receiver_id, text]);
+
+      // Invalidate conversation cache
+      const cachePattern = `conversation:*${[sender_id, receiver_id]
+        .sort()
+        .join(":*")}*`;
+      await redisClient.invalidate(cachePattern);
+
+      // Invalidate user conversations cache
+      await redisClient.invalidate(`user:${sender_id}:conversations:*`);
+      await redisClient.invalidate(`user:${receiver_id}:conversations:*`);
+
+      return message[0];
+    } catch (error) {
+      console.error("Error in createTextMessage:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new media message
+   * @param {Object} messageData - Message data
+   * @param {UUID} messageData.sender_id - Sender's user ID
+   * @param {UUID} messageData.receiver_id - Receiver's user ID
+   * @param {string} messageData.text - Optional text caption
+   * @param {Object} mediaData - Media content data
+   * @param {string} mediaData.title - Media title
+   * @param {string} mediaData.description - Media description
+   * @param {string} mediaData.content_type - Media type (image, video, audio)
+   * @param {string} mediaData.url - Media URL in Azure Blob Storage
+   * @param {string} mediaData.thumbnail_url - Thumbnail URL (optional)
+   * @param {number} mediaData.size - File size in bytes
+   * @param {number} mediaData.duration - Media duration (for audio/video)
+   * @returns {Object} - Created message with media
+   */
+  static async createMediaMessage(messageData, mediaData) {
+    try {
+      const { sender_id, receiver_id, text = "" } = messageData;
+      const {
+        title,
+        description,
+        content_type,
+        url,
+        thumbnail_url = null,
+        size,
+        duration = null,
+      } = mediaData;
+
+      // Begin transaction
+      await sql`BEGIN`;
+
+      try {
+        // Insert media content first
+        const mediaQuery = `
+          INSERT INTO media_contents (
+            title,
+            description,
+            content_type,
+            url,
+            thumbnail_url,
+            uploaded_by,
+            size,
+            duration
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING id;
+        `;
+
+        const mediaResult = await sql(mediaQuery, [
+          title,
+          description,
+          content_type,
+          url,
+          thumbnail_url,
+          sender_id,
+          size,
+          duration,
+        ]);
+
+        const media_id = mediaResult[0].id;
+
+        // Insert message with media reference
+        const messageQuery = `
+          INSERT INTO messages (
+            sender_id,
+            receiver_id,
+            text,
+            media_id
+          )
+          VALUES ($1, $2, $3, $4)
+          RETURNING 
+            message_id, 
+            sender_id, 
+            receiver_id, 
+            text, 
+            media_id, 
+            sent_at,
+            created_at;
+        `;
+
+        const message = await sql(messageQuery, [
+          sender_id,
+          receiver_id,
+          text,
+          media_id,
+        ]);
+
+        // Commit transaction
+        await sql`COMMIT`;
+
+        // Invalidate conversation cache
+        const cachePattern = `conversation:*${[sender_id, receiver_id]
+          .sort()
+          .join(":*")}*`;
+        await redisClient.invalidate(cachePattern);
+
+        // Invalidate user conversations cache
+        await redisClient.invalidate(`user:${sender_id}:conversations:*`);
+        await redisClient.invalidate(`user:${receiver_id}:conversations:*`);
+
+        return {
+          ...message[0],
+          media: {
+            id: media_id,
+            content_type,
+            url,
+            thumbnail_url,
+          },
+        };
+      } catch (error) {
+        // Rollback transaction in case of error
+        await sql`ROLLBACK`;
+        throw error;
+      }
+    } catch (error) {
+      console.error("Error in createMediaMessage:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get unread message count for a user
+   * @param {UUID} userId - User ID
+   * @returns {Object} - Total unread count and breakdown by sender
+   */
+  static async getUnreadMessageCount(userId) {
+    try {
+      const cacheKey = `user:${userId}:unread_messages`;
+      const cachedCount = await redisClient.get(cacheKey);
+
+      if (cachedCount) {
+        return cachedCount;
+      }
+
+      // Get total unread count
+      const totalQuery = `
+        SELECT COUNT(*) as total_unread
+        FROM messages
+        WHERE receiver_id = $1 AND read_at IS NULL;
+      `;
+
+      const totalResult = await sql(totalQuery, [userId]);
+
+      // Get breakdown by sender
+      const breakdownQuery = `
+        SELECT 
+          sender_id,
+          u.full_name as sender_name,
+          COUNT(*) as unread_count
+        FROM messages m
+        JOIN users u ON m.sender_id = u.id
+        WHERE 
+          receiver_id = $1 AND 
+          read_at IS NULL
+        GROUP BY sender_id, u.full_name
+        ORDER BY unread_count DESC;
+      `;
+
+      const breakdown = await sql(breakdownQuery, [userId]);
+
+      const result = {
+        total_unread: totalResult[0].total_unread,
+        breakdown,
+      };
+
+      // Cache results
+      await redisClient.set(cacheKey, result, 300); // 5 minutes cache
+
+      return result;
+    } catch (error) {
+      console.error("Error in getUnreadMessageCount:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a message (soft delete - only marks it as deleted in UI)
+   * @param {UUID} messageId - Message ID
+   * @param {UUID} userId - User ID requesting deletion
+   * @returns {boolean} - Success status
+   */
+  static async deleteMessage(messageId, userId) {
+    try {
+      // Check if user is the sender
+      const checkQuery = `
+        SELECT 
+          sender_id, 
+          receiver_id
+        FROM messages
+        WHERE message_id = $1;
+      `;
+
+      const checkResult = await sql(checkQuery, [messageId]);
+
+      if (!checkResult.length) {
+        throw new Error("Message not found");
+      }
+
+      const message = checkResult[0];
+
+      if (message.sender_id !== userId) {
+        throw new Error("Unauthorized to delete this message");
+      }
+
+      // Update message text to indicate deletion
+      const updateQuery = `
+        UPDATE messages
+        SET 
+          text = '[This message was deleted]',
+          media_id = NULL,
+          updated_at = NOW()
+        WHERE 
+          message_id = $1 AND
+          sender_id = $2
+        RETURNING message_id;
+      `;
+
+      const result = await sql(updateQuery, [messageId, userId]);
+
+      // Invalidate conversation cache
+      const cachePattern = `conversation:*${[
+        message.sender_id,
+        message.receiver_id,
+      ]
+        .sort()
+        .join(":*")}*`;
+      await redisClient.invalidate(cachePattern);
+
+      // Invalidate user conversations cache
+      await redisClient.invalidate(`user:${message.sender_id}:conversations:*`);
+      await redisClient.invalidate(
+        `user:${message.receiver_id}:conversations:*`
+      );
+
+      return result.length > 0;
+    } catch (error) {
+      console.error("Error in deleteMessage:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get message delivery status
+   * @param {UUID} messageId - Message ID
+   * @returns {Object} - Message delivery status
+   */
+  static async getMessageStatus(messageId) {
+    try {
+      const query = `
+        SELECT 
+          message_id,
+          sent_at,
+          read_at,
+          CASE
+            WHEN read_at IS NOT NULL THEN 'read'
+            ELSE 'delivered'
+          END as status
+        FROM messages
+        WHERE message_id = $1;
+      `;
+
+      const result = await sql(query, [messageId]);
+
+      if (!result.length) {
+        throw new Error("Message not found");
+      }
+
+      return result[0];
+    } catch (error) {
+      console.error("Error in getMessageStatus:", error.message);
+      throw error;
+    }
+  }
+}
+
+module.exports = Message;
