@@ -3,13 +3,16 @@ const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
-// const { initializeDatabaseTables } = require("./config/database");
+const { initializeDatabaseTables } = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const announcementRoutes = require("./routes/annoucements/annoucementsRoutes");
 const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
 const mediaContentRoutes  = require("./routes/churchgallery/mediaContent");
+// const socketRoutes = require("./routes/sockets/chat-routes");
+// const redis = require("redis");
+// const redisAdapter = require("socket.io-redis");
 
 const createApp = () => {
   const app = express();
@@ -28,6 +31,25 @@ const createApp = () => {
       },
     })
   );
+
+  // Initialize the Socket.IO service
+// const socketService = new socketService(server);
+
+// Apply Redis adapter if needed for scaling
+if (process.env.USE_REDIS === 'true') {
+  const redisConfig = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: process.env.REDIS_PORT || 6379,
+    password: process.env.REDIS_PASSWORD || '',
+  };
+  
+  const pubClient = redis.createClient(redisConfig);
+  const subClient = redis.createClient(redisConfig);
+  
+  socketService.io.adapter(redisAdapter({ pubClient, subClient }));
+  
+  console.log('Socket.IO Redis adapter initialized');
+}
 
   // Middleware setup
   const setupMiddleware = () => {
@@ -68,6 +90,7 @@ const createApp = () => {
       { path: "/api/announcements", router: announcementRoutes },
       { path: "/api/suggestions", router: suggestionRoutes },
       { path: "/api/media", router: mediaContentRoutes },
+      // { path: "/api/socket", router: socketRoutes },
     ];
 
     // Register all API routes
@@ -143,7 +166,7 @@ const createApp = () => {
   const initialize = async () => {
     try {
       await 
-      // initializeDatabaseTables();
+      initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();

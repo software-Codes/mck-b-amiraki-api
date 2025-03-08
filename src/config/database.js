@@ -42,7 +42,14 @@ const createEnumTypes = async () => {
           CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected');
         END IF;
       END $$; 
+
     `,
+      // Add this to enumTypes
+      `DO $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'message_status') THEN
+  CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read', 'deleted');
+END IF;
+END $$;`,
     ];
 
     for (const command of enumCommands) {
@@ -152,7 +159,7 @@ const createPaymentSummariesTable = async () => {
       CREATE TABLE IF NOT EXISTS payment_summaries (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         date DATE NOT NULL,
-        purpose payment_purpose NOT NULL,
+        purpose payment_purpose NOT NULL, 
         total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
         transaction_count INTEGER NOT NULL DEFAULT 0,
         last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -314,6 +321,7 @@ const createContactsTable = async () => {
     console.error("Error creating contacts table:", error.message);
   }
 };
+// Update messages table
 const createMessagesTable = async () => {
   try {
     await sql`
@@ -321,14 +329,25 @@ const createMessagesTable = async () => {
         message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        text TEXT NOT NULL,
+        text TEXT,
         media_id UUID REFERENCES media_contents(id),
+        status message_status DEFAULT 'sent',
         sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        delivered_at TIMESTAMP WITH TIME ZONE,
         read_at TIMESTAMP WITH TIME ZONE,
+        deleted_at TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `;
+
+    // // Add indexes
+    // await sql`
+    //   CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
+    //   CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id);
+    //   CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
+    // `;
+
     console.log("Messages table created successfully");
   } catch (error) {
     console.error("Error creating messages table:", error.message);
@@ -422,6 +441,8 @@ const createMediaContentsTable = async () => {
         views_count INTEGER DEFAULT 0,
         deleted_at TIMESTAMP WITH TIME ZONE,
         deleted_by UUID REFERENCES users(id),
+        is_attached BOOLEAN DEFAULT true,
+                message_id UUID REFERENCES messages(message_id) ON DELETE SET NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -457,7 +478,7 @@ const initializeDatabaseTables = async () => {
     await createSuggestionsTable();
     await createMediaContentsTable();
     await createContactsTable();
-    await createMessagesTable();  
+    await createMessagesTable();
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);

@@ -1,6 +1,6 @@
 // models/Conversation.js
 const { sql } = require("../../config/database");
-const { RedisService } = require("../services/RedisService");
+const { RedisService } = require("../../services/redisCaching");
 const redisClient = new RedisService();
 
 class Conversation {
@@ -231,6 +231,58 @@ class Conversation {
       return conversations;
     } catch (error) {
       console.error("Error in getUserConversations:", error.message);
+      throw error;
+    }
+  }
+    /**
+   * Get message status timeline
+   * @param {UUID} messageId - Message ID
+   * @returns {Object} - Status timeline
+   */
+    static async getMessageTimeline(messageId) {
+      try {
+        const query = `
+          SELECT 
+            sent_at,
+            delivered_at,
+            read_at,
+            deleted_at,
+            status
+          FROM messages
+          WHERE message_id = $1;
+        `;
+        
+        const result = await sql(query, [messageId]);
+        return result[0];
+      } catch (error) {
+        console.error("Error in getMessageTimeline:", error.message);
+        throw error;
+      }
+    }
+      /**
+   * Get conversation status summary
+   * @param {UUID} userId1 - First user ID
+   * @param {UUID} userId2 - Second user ID
+   * @returns {Object} - Conversation status summary
+   */
+  static async getConversationStatusSummary(userId1, userId2) {
+    try {
+      const query = `
+        SELECT 
+          COUNT(*) FILTER (WHERE status = 'sent') AS sent_count,
+          COUNT(*) FILTER (WHERE status = 'delivered') AS delivered_count,
+          COUNT(*) FILTER (WHERE status = 'read') AS read_count,
+          COUNT(*) FILTER (WHERE status = 'deleted') AS deleted_count,
+          MAX(sent_at) AS last_message_time
+        FROM messages
+        WHERE (sender_id = $1 AND receiver_id = $2)
+           OR (sender_id = $2 AND receiver_id = $1);
+      `;
+      
+      const result = await sql(query, [userId1, userId2]);
+      return result[0];
+    } catch (error) {
+      console.error("Error in getConversationStatusSummary:", error.message);
       throw error;
     }
   }

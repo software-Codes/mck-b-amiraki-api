@@ -1,6 +1,6 @@
 const { sql } = require("../../config/database");
 // models/Contact.js
-const { RedisService } = require("../services/RedisService");
+const { RedisService } = require("../../models/churchgallery/redisCache");
 const redisClient = new RedisService();
 
 class Contact {

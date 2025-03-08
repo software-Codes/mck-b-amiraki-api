@@ -1,7 +1,7 @@
 // models/Message.js
 
 const { sql } = require("../../config/database");
-const { RedisService } = require("../services/RedisService");
+const { RedisService } = require("../../models/churchgallery/redisCache");
 const redisClient = new RedisService();
 
 class Message {
@@ -189,6 +189,32 @@ class Message {
     }
   }
 
+    /**
+   * Update message delivery status
+   * @param {UUID} messageId - Message ID
+   * @returns {Object} - Updated message status
+   */
+    static async markAsDelivered(messageId) {
+      try {
+        const query = `
+          UPDATE messages
+          SET 
+            status = 'delivered',
+            delivered_at = NOW(),
+            updated_at = NOW()
+          WHERE message_id = $1
+          RETURNING *;
+        `;
+        
+        const result = await sql(query, [messageId]);
+        await this.invalidateMessageCaches(result[0]);
+        return result[0];
+      } catch (error) {
+        console.error("Error in markAsDelivered:", error.message);
+        throw error;
+      }
+    }
+
   /**
    * Get unread message count for a user
    * @param {UUID} userId - User ID
@@ -245,70 +271,50 @@ class Message {
   }
 
   /**
-   * Delete a message (soft delete - only marks it as deleted in UI)
+   * Enhanced message deletion with status tracking
    * @param {UUID} messageId - Message ID
    * @param {UUID} userId - User ID requesting deletion
-   * @returns {boolean} - Success status
+   * @returns {Object} - Deletion result
    */
   static async deleteMessage(messageId, userId) {
     try {
-      // Check if user is the sender
-      const checkQuery = `
-        SELECT 
-          sender_id, 
-          receiver_id
-        FROM messages
-        WHERE message_id = $1;
-      `;
-
-      const checkResult = await sql(checkQuery, [messageId]);
-
-      if (!checkResult.length) {
-        throw new Error("Message not found");
-      }
-
-      const message = checkResult[0];
-
-      if (message.sender_id !== userId) {
-        throw new Error("Unauthorized to delete this message");
-      }
-
-      // Update message text to indicate deletion
-      const updateQuery = `
+      const query = `
         UPDATE messages
         SET 
-          text = '[This message was deleted]',
-          media_id = NULL,
+          status = 'deleted',
+          deleted_at = NOW(),
           updated_at = NOW()
-        WHERE 
-          message_id = $1 AND
-          sender_id = $2
-        RETURNING message_id;
+        WHERE message_id = $1
+          AND sender_id = $2
+        RETURNING *;
       `;
-
-      const result = await sql(updateQuery, [messageId, userId]);
-
-      // Invalidate conversation cache
-      const cachePattern = `conversation:*${[
-        message.sender_id,
-        message.receiver_id,
-      ]
-        .sort()
-        .join(":*")}*`;
-      await redisClient.invalidate(cachePattern);
-
-      // Invalidate user conversations cache
-      await redisClient.invalidate(`user:${message.sender_id}:conversations:*`);
-      await redisClient.invalidate(
-        `user:${message.receiver_id}:conversations:*`
-      );
-
-      return result.length > 0;
+      
+      const result = await sql(query, [messageId, userId]);
+      await this.invalidateMessageCaches(result[0]);
+      return result[0];
     } catch (error) {
       console.error("Error in deleteMessage:", error.message);
       throw error;
     }
   }
+
+    /**
+   * Common cache invalidation method
+   * @param {Object} message - Message object
+   */
+    static async invalidateMessageCaches(message) {
+      const participants = [message.sender_id, message.receiver_id].sort();
+      const patterns = [
+        `conversation:*${participants.join(':')}*`,
+        `user:${message.sender_id}:*`,
+        `user:${message.receiver_id}:*`
+      ];
+      
+      await Promise.all(patterns.map(pattern => 
+        redisClient.invalidate(pattern)
+      ));
+    }
+  
 
   /**
    * Get message delivery status
