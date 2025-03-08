@@ -436,7 +436,7 @@ const createMediaContentsTable = async () => {
         url TEXT NOT NULL,
         thumbnail_url TEXT,
         uploaded_by UUID NOT NULL REFERENCES users(id),
-        size BIGINT NOT NULL,
+        size BIGINT NOT NULL,clear
         duration INTEGER,
         views_count INTEGER DEFAULT 0,
         deleted_at TIMESTAMP WITH TIME ZONE,

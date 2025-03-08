@@ -81,6 +81,10 @@ router.post(
   userController.verifyAdmin
 );
 
+//reset password
+router.put("/change-password", userController.changePassword);
+
+
 // All protected routes below this middleware
 router.use(authMiddleware, requireActive);
 
@@ -92,7 +96,6 @@ router.put(
   upload.single("profilePhoto"),
   userController.updateProfile
 );
-router.put("/change-password", userController.changePassword);
 
 // Self-account deletion route
 router.delete("/account", userController.deleteUser);
