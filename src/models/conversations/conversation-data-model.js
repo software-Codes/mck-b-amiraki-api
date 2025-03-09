@@ -1,26 +1,21 @@
-// models/Conversation.js
 const { sql } = require("../../config/database");
-const { RedisService } = require("../../services/redisCaching");
-const redisClient = new RedisService();
 
+/**
+ * Conversation model class for managing user conversations
+ * This class provides methods for creating, retrieving, and managing conversations
+ * between users, including message history and conversation status.
+ */
 class Conversation {
   /**
    * Creates a new conversation or returns existing one between users
-   * @param {UUID} userId1 - First user's ID
-   * @param {UUID} userId2 - Second user's ID
-   * @returns {Object} - Conversation details
+   * @param {string} userId1 - First user's ID
+   * @param {string} userId2 - Second user's ID
+   * @returns {Promise<Object>} - Conversation details
+   * @throws {Error} - Throws an error if users are not contacts
    */
   static async getOrCreateConversation(userId1, userId2) {
     try {
-      // Check cache first
-      const cacheKey = `conversation:${[userId1, userId2].sort().join(':')}`;
-      const cachedConversation = await redisClient.get(cacheKey);
-      
-      if (cachedConversation) {
-        return cachedConversation;
-      }
-
-      // Try to find existing conversation
+      // Check if users are contacts
       const query = `
         WITH user_contacts AS (
           SELECT contact_user_id 
@@ -38,9 +33,9 @@ class Conversation {
           END as are_contacts
         FROM user_contacts;
       `;
-      
+
       const areContacts = await sql(query, [userId1, userId2]);
-      
+
       if (!areContacts.length || !areContacts[0].are_contacts) {
         throw new Error("Users are not contacts");
       }
@@ -51,10 +46,7 @@ class Conversation {
         created_at: new Date().toISOString(),
         last_active: new Date().toISOString()
       };
-      
-      // Cache the conversation data
-      await redisClient.set(cacheKey, conversationData, 86400); // 24 hours
-      
+
       return conversationData;
     } catch (error) {
       console.error("Error in getOrCreateConversation:", error.message);
@@ -64,23 +56,15 @@ class Conversation {
 
   /**
    * Get conversation history between two users with pagination
-   * @param {UUID} userId1 - First user's ID
-   * @param {UUID} userId2 - Second user's ID
-   * @param {number} page - Page number (starting from 1)
-   * @param {number} limit - Number of messages per page
-   * @returns {Array} - Array of messages
+   * @param {string} userId1 - First user's ID
+   * @param {string} userId2 - Second user's ID
+   * @param {number} [page=1] - Page number (starting from 1)
+   * @param {number} [limit=20] - Number of messages per page
+   * @returns {Promise<Array>} - Array of messages
    */
   static async getConversationHistory(userId1, userId2, page = 1, limit = 20) {
     try {
       const offset = (page - 1) * limit;
-      
-      // Generate cache key for this specific page of conversation
-      const cacheKey = `conversation:${[userId1, userId2].sort().join(':')}:messages:page${page}:limit${limit}`;
-      const cachedMessages = await redisClient.get(cacheKey);
-      
-      if (cachedMessages) {
-        return cachedMessages;
-      }
 
       const query = `
         SELECT 
@@ -105,12 +89,9 @@ class Conversation {
         ORDER BY m.sent_at DESC
         LIMIT $3 OFFSET $4;
       `;
-      
+
       const messages = await sql(query, [userId1, userId2, limit, offset]);
-      
-      // Cache results for faster subsequent retrievals
-      await redisClient.set(cacheKey, messages, 3600); // 1 hour cache
-      
+
       return messages;
     } catch (error) {
       console.error("Error in getConversationHistory:", error.message);
@@ -120,30 +101,26 @@ class Conversation {
 
   /**
    * Mark messages as read
-   * @param {UUID} receiverId - Receiver's user ID
-   * @param {UUID} senderId - Sender's user ID
-   * @returns {number} - Number of messages marked as read
+   * @param {string} receiverId - Receiver's user ID
+   * @param {string} senderId - Sender's user ID
+   * @returns {Promise<number>} - Number of messages marked as read
    */
   static async markMessagesAsRead(receiverId, senderId) {
     try {
       const query = `
         UPDATE messages
-        SET 
+        SET
           read_at = NOW(),
           updated_at = NOW()
-        WHERE 
-          receiver_id = $1 AND 
+        WHERE
+          receiver_id = $1 AND
           sender_id = $2 AND
           read_at IS NULL
-        RETURNING message_id;
+          RETURNING message_id;
       `;
-      
+
       const result = await sql(query, [receiverId, senderId]);
-      
-      // Invalidate relevant cache
-      const cachePattern = `conversation:*${[receiverId, senderId].sort().join(':*')}*`;
-      await redisClient.invalidate(cachePattern);
-      
+
       return result.length;
     } catch (error) {
       console.error("Error in markMessagesAsRead:", error.message);
@@ -153,20 +130,14 @@ class Conversation {
 
   /**
    * Get all conversations for a user with last message preview
-   * @param {UUID} userId - User ID 
-   * @param {number} page - Page number
-   * @param {number} limit - Items per page
-   * @returns {Array} - List of conversations with last message
+   * @param {string} userId - User ID
+   * @param {number} [page=1] - Page number
+   * @param {number} [limit=20] - Items per page
+   * @returns {Promise<Array>} - List of conversations with last message
    */
   static async getUserConversations(userId, page = 1, limit = 20) {
     try {
       const offset = (page - 1) * limit;
-      const cacheKey = `user:${userId}:conversations:page${page}:limit${limit}`;
-      const cachedConversations = await redisClient.get(cacheKey);
-      
-      if (cachedConversations) {
-        return cachedConversations;
-      }
 
       const query = `
         WITH user_contacts AS (
@@ -222,63 +193,62 @@ class Conversation {
         ORDER BY lm.sent_at DESC
         LIMIT $2 OFFSET $3;
       `;
-      
+
       const conversations = await sql(query, [userId, limit, offset]);
-      
-      // Cache results
-      await redisClient.set(cacheKey, conversations, 1800); // 30 minutes
-      
+
       return conversations;
     } catch (error) {
       console.error("Error in getUserConversations:", error.message);
       throw error;
     }
   }
-    /**
+
+  /**
    * Get message status timeline
-   * @param {UUID} messageId - Message ID
-   * @returns {Object} - Status timeline
+   * @param {string} messageId - Message ID
+   * @returns {Promise<Object>} - Status timeline
    */
-    static async getMessageTimeline(messageId) {
-      try {
-        const query = `
-          SELECT 
-            sent_at,
-            delivered_at,
-            read_at,
-            deleted_at,
-            status
-          FROM messages
-          WHERE message_id = $1;
-        `;
-        
-        const result = await sql(query, [messageId]);
-        return result[0];
-      } catch (error) {
-        console.error("Error in getMessageTimeline:", error.message);
-        throw error;
-      }
+  static async getMessageTimeline(messageId) {
+    try {
+      const query = `
+        SELECT
+          sent_at,
+          delivered_at,
+          read_at,
+          deleted_at,
+          status
+        FROM messages
+        WHERE message_id = $1;
+      `;
+
+      const result = await sql(query, [messageId]);
+      return result[0];
+    } catch (error) {
+      console.error("Error in getMessageTimeline:", error.message);
+      throw error;
     }
-      /**
+  }
+
+  /**
    * Get conversation status summary
-   * @param {UUID} userId1 - First user ID
-   * @param {UUID} userId2 - Second user ID
-   * @returns {Object} - Conversation status summary
+   * @param {string} userId1 - First user ID
+   * @param {string} userId2 - Second user ID
+   * @returns {Promise<Object>} - Conversation status summary
    */
   static async getConversationStatusSummary(userId1, userId2) {
     try {
       const query = `
-        SELECT 
+        SELECT
           COUNT(*) FILTER (WHERE status = 'sent') AS sent_count,
-          COUNT(*) FILTER (WHERE status = 'delivered') AS delivered_count,
-          COUNT(*) FILTER (WHERE status = 'read') AS read_count,
-          COUNT(*) FILTER (WHERE status = 'deleted') AS deleted_count,
-          MAX(sent_at) AS last_message_time
+            COUNT(*) FILTER (WHERE status = 'delivered') AS delivered_count,
+            COUNT(*) FILTER (WHERE status = 'read') AS read_count,
+            COUNT(*) FILTER (WHERE status = 'deleted') AS deleted_count,
+            MAX(sent_at) AS last_message_time
         FROM messages
         WHERE (sender_id = $1 AND receiver_id = $2)
            OR (sender_id = $2 AND receiver_id = $1);
       `;
-      
+
       const result = await sql(query, [userId1, userId2]);
       return result[0];
     } catch (error) {

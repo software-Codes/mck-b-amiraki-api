@@ -1,17 +1,19 @@
-// models/Message.js
-
 const { sql } = require("../../config/database");
-const { RedisService } = require("../../models/churchgallery/redisCache");
-const redisClient = new RedisService();
 
+/**
+ * Message model class for handling message operations
+ * This class provides methods for creating, updating, and retrieving messages,
+ * including text messages, media messages, and message status management.
+ */
 class Message {
   /**
    * Create a new text message
    * @param {Object} messageData - Message data
-   * @param {UUID} messageData.sender_id - Sender's user ID
-   * @param {UUID} messageData.receiver_id - Receiver's user ID
+   * @param {string} messageData.sender_id - Sender's user ID
+   * @param {string} messageData.receiver_id - Receiver's user ID
    * @param {string} messageData.text - Message text content
-   * @returns {Object} - Created message
+   * @returns {Promise<Object>} - Created message object
+   * @throws {Error} - Throws if users are not contacts or database operation fails
    */
   static async createTextMessage(messageData) {
     try {
@@ -51,16 +53,6 @@ class Message {
 
       const message = await sql(query, [sender_id, receiver_id, text]);
 
-      // Invalidate conversation cache
-      const cachePattern = `conversation:*${[sender_id, receiver_id]
-        .sort()
-        .join(":*")}*`;
-      await redisClient.invalidate(cachePattern);
-
-      // Invalidate user conversations cache
-      await redisClient.invalidate(`user:${sender_id}:conversations:*`);
-      await redisClient.invalidate(`user:${receiver_id}:conversations:*`);
-
       return message[0];
     } catch (error) {
       console.error("Error in createTextMessage:", error.message);
@@ -71,18 +63,19 @@ class Message {
   /**
    * Create a new media message
    * @param {Object} messageData - Message data
-   * @param {UUID} messageData.sender_id - Sender's user ID
-   * @param {UUID} messageData.receiver_id - Receiver's user ID
+   * @param {string} messageData.sender_id - Sender's user ID
+   * @param {string} messageData.receiver_id - Receiver's user ID
    * @param {string} messageData.text - Optional text caption
    * @param {Object} mediaData - Media content data
    * @param {string} mediaData.title - Media title
    * @param {string} mediaData.description - Media description
    * @param {string} mediaData.content_type - Media type (image, video, audio)
    * @param {string} mediaData.url - Media URL in Azure Blob Storage
-   * @param {string} mediaData.thumbnail_url - Thumbnail URL (optional)
+   * @param {string} [mediaData.thumbnail_url=null] - Thumbnail URL (optional)
    * @param {number} mediaData.size - File size in bytes
-   * @param {number} mediaData.duration - Media duration (for audio/video)
-   * @returns {Object} - Created message with media
+   * @param {number} [mediaData.duration=null] - Media duration (for audio/video)
+   * @returns {Promise<Object>} - Created message with media information
+   * @throws {Error} - Throws if users are not contacts or database operation fails
    */
   static async createMediaMessage(messageData, mediaData) {
     try {
@@ -159,16 +152,6 @@ class Message {
         // Commit transaction
         await sql`COMMIT`;
 
-        // Invalidate conversation cache
-        const cachePattern = `conversation:*${[sender_id, receiver_id]
-          .sort()
-          .join(":*")}*`;
-        await redisClient.invalidate(cachePattern);
-
-        // Invalidate user conversations cache
-        await redisClient.invalidate(`user:${sender_id}:conversations:*`);
-        await redisClient.invalidate(`user:${receiver_id}:conversations:*`);
-
         return {
           ...message[0],
           media: {
@@ -189,46 +172,40 @@ class Message {
     }
   }
 
-    /**
-   * Update message delivery status
-   * @param {UUID} messageId - Message ID
-   * @returns {Object} - Updated message status
+  /**
+   * Update message delivery status to 'delivered'
+   * @param {string} messageId - Message ID to update
+   * @returns {Promise<Object>} - Updated message object
+   * @throws {Error} - Throws if message update fails
    */
-    static async markAsDelivered(messageId) {
-      try {
-        const query = `
-          UPDATE messages
-          SET 
-            status = 'delivered',
-            delivered_at = NOW(),
-            updated_at = NOW()
-          WHERE message_id = $1
-          RETURNING *;
-        `;
-        
-        const result = await sql(query, [messageId]);
-        await this.invalidateMessageCaches(result[0]);
-        return result[0];
-      } catch (error) {
-        console.error("Error in markAsDelivered:", error.message);
-        throw error;
-      }
+  static async markAsDelivered(messageId) {
+    try {
+      const query = `
+        UPDATE messages
+        SET 
+          status = 'delivered',
+          delivered_at = NOW(),
+          updated_at = NOW()
+        WHERE message_id = $1
+        RETURNING *;
+      `;
+
+      const result = await sql(query, [messageId]);
+      return result[0];
+    } catch (error) {
+      console.error("Error in markAsDelivered:", error.message);
+      throw error;
     }
+  }
 
   /**
    * Get unread message count for a user
-   * @param {UUID} userId - User ID
-   * @returns {Object} - Total unread count and breakdown by sender
+   * @param {string} userId - User ID
+   * @returns {Promise<Object>} - Object containing total unread count and breakdown by sender
+   * @throws {Error} - Throws if query execution fails
    */
   static async getUnreadMessageCount(userId) {
     try {
-      const cacheKey = `user:${userId}:unread_messages`;
-      const cachedCount = await redisClient.get(cacheKey);
-
-      if (cachedCount) {
-        return cachedCount;
-      }
-
       // Get total unread count
       const totalQuery = `
         SELECT COUNT(*) as total_unread
@@ -260,9 +237,6 @@ class Message {
         breakdown,
       };
 
-      // Cache results
-      await redisClient.set(cacheKey, result, 300); // 5 minutes cache
-
       return result;
     } catch (error) {
       console.error("Error in getUnreadMessageCount:", error.message);
@@ -271,10 +245,11 @@ class Message {
   }
 
   /**
-   * Enhanced message deletion with status tracking
-   * @param {UUID} messageId - Message ID
-   * @param {UUID} userId - User ID requesting deletion
-   * @returns {Object} - Deletion result
+   * Delete a message by marking it as 'deleted'
+   * @param {string} messageId - Message ID to delete
+   * @param {string} userId - User ID requesting deletion (must be sender)
+   * @returns {Promise<Object>} - Deleted message object
+   * @throws {Error} - Throws if deletion fails or user is not authorized
    */
   static async deleteMessage(messageId, userId) {
     try {
@@ -288,9 +263,8 @@ class Message {
           AND sender_id = $2
         RETURNING *;
       `;
-      
+
       const result = await sql(query, [messageId, userId]);
-      await this.invalidateMessageCaches(result[0]);
       return result[0];
     } catch (error) {
       console.error("Error in deleteMessage:", error.message);
@@ -298,28 +272,11 @@ class Message {
     }
   }
 
-    /**
-   * Common cache invalidation method
-   * @param {Object} message - Message object
-   */
-    static async invalidateMessageCaches(message) {
-      const participants = [message.sender_id, message.receiver_id].sort();
-      const patterns = [
-        `conversation:*${participants.join(':')}*`,
-        `user:${message.sender_id}:*`,
-        `user:${message.receiver_id}:*`
-      ];
-      
-      await Promise.all(patterns.map(pattern => 
-        redisClient.invalidate(pattern)
-      ));
-    }
-  
-
   /**
    * Get message delivery status
-   * @param {UUID} messageId - Message ID
-   * @returns {Object} - Message delivery status
+   * @param {string} messageId - Message ID
+   * @returns {Promise<Object>} - Message status information
+   * @throws {Error} - Throws if message not found or query fails
    */
   static async getMessageStatus(messageId) {
     try {

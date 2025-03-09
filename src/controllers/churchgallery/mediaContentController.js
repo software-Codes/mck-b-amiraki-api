@@ -4,7 +4,6 @@ const { MediaContent } = require("../../models/churchgallery/MediaContent");
 const {
   AzureStorageService,
 } = require("../../models/churchgallery/azureStorage");
-const { RedisService } = require("../../models/churchgallery/redisCache");
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
@@ -33,11 +32,22 @@ const upload = multer({
 
 // Initialize services
 const azureStorageService = new AzureStorageService();
-const redisService = new RedisService();
+
+/**
+ * Controller class for handling media content operations
+ * This controller manages the upload, retrieval, and deletion of media content
+ * including both images and videos, with storage in Azure and metadata in database
+ */
 class MediaContentController {
+  /**
+   * Handles multiple file uploads to Azure Storage and database storage
+   * @param {Object} req - Express request object containing files and metadata
+   * @param {Object} res - Express response object for sending responses
+   * @returns {Promise} - Resolves with upload results or rejects with error
+   */
   static async uploadMultipleContent(req, res) {
     try {
-      // Handle file upload
+      // Handle file upload using multer
       await new Promise((resolve, reject) => {
         upload(req, res, (err) => {
           if (err) {
@@ -64,7 +74,7 @@ class MediaContentController {
         return res.status(400).json({ error: "No files uploaded" });
       }
 
-      // Process each file
+      // Process each file and upload to Azure
       const uploadResults = await Promise.allSettled(
         req.files.map(async (file, index) => {
           try {
@@ -119,13 +129,6 @@ class MediaContentController {
         })
       );
 
-      // Invalidate cache after successful uploads
-      try {
-        await redisService.invalidate("media:list:*");
-      } catch (cacheError) {
-        console.warn("Cache invalidation failed:", cacheError);
-      }
-
       // Process results
       const successfulUploads = uploadResults
         .filter(
@@ -143,7 +146,7 @@ class MediaContentController {
             result.status === "rejected" ? result.reason : result.value.error,
         }));
 
-      // Send response
+      // Send response with detailed upload results
       res.status(207).json({
         message: "Upload process completed",
         successful: successfulUploads,
@@ -161,26 +164,25 @@ class MediaContentController {
     }
   }
 
+  /**
+   * Retrieves paginated list of media content from database
+   * @param {Object} req - Express request object containing pagination parameters
+   * @param {Object} res - Express response object for sending responses
+   * @returns {Promise} - Resolves with media content list or rejects with error
+   */
   static async getAllContent(req, res) {
     try {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const contentType = req.query.contentType;
 
-      const cacheKey = `media:list:${page}:${limit}:${contentType || "all"}`;
-      const cachedData = await redisService.get(cacheKey);
-
-      if (cachedData) {
-        return res.json(cachedData);
-      }
-
+      // Fetch media content directly from database
       const mediaContents = await MediaContent.findAll({
         page,
         limit,
         contentType,
       });
 
-      await redisService.set(cacheKey, mediaContents);
       res.json(mediaContents);
     } catch (error) {
       console.error("Failed to get media content:", error);
@@ -188,23 +190,24 @@ class MediaContentController {
     }
   }
 
+  /**
+   * Retrieves single media content item by ID
+   * @param {Object} req - Express request object containing media ID
+   * @param {Object} res - Express response object for sending responses
+   * @returns {Promise} - Resolves with media content item or rejects with error
+   */
   static async getContentById(req, res) {
     try {
       const { id } = req.params;
-      const cacheKey = `media:single:${id}`;
-      const cachedData = await redisService.get(cacheKey);
-
-      if (cachedData) {
-        return res.json(cachedData);
-      }
 
       const mediaContent = await MediaContent.findById(id);
       if (!mediaContent) {
         return res.status(404).json({ error: "Media content not found" });
       }
 
+      // Update view count for the media content
       await MediaContent.updateViewCount(id);
-      await redisService.set(cacheKey, mediaContent);
+
       res.json(mediaContent);
     } catch (error) {
       console.error("Failed to get media content:", error);
@@ -212,6 +215,12 @@ class MediaContentController {
     }
   }
 
+  /**
+   * Deletes media content item and associated files
+   * @param {Object} req - Express request object containing media ID
+   * @param {Object} res - Express response object for sending responses
+   * @returns {Promise} - Resolves with success message or rejects with error
+   */
   static async deleteContent(req, res) {
     try {
       const { id } = req.params;
@@ -221,14 +230,14 @@ class MediaContentController {
         return res.status(404).json({ error: "Media content not found" });
       }
 
+      // Delete files from Azure Storage
       await azureStorageService.deleteFile(content.url);
       if (content.thumbnailUrl) {
         await azureStorageService.deleteFile(content.thumbnailUrl);
       }
 
+      // Delete database record
       await MediaContent.delete(id, req.user.id);
-      await redisService.invalidate(`media:single:${id}`);
-      await redisService.invalidate("media:list:*");
 
       res.json({ message: "Media content deleted successfully" });
     } catch (error) {

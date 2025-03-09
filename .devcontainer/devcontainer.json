@@ -14,7 +14,6 @@
                 "terminal.integrated.fontWeight": "normal",
                 "workbench.colorCustomizations": {
                     "terminal.background": "#0C2B0C",
-                    "terminal.foreground": "#00FF00",
                     "terminal.ansiBlack": "#000000",
                     "terminal.ansiBlue": "#0066FF",
                     "terminal.ansiBrightBlack": "#666666",

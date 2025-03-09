@@ -1,14 +1,18 @@
 const { sql } = require("../../config/database");
 // models/Contact.js
-const { RedisService } = require("../../models/churchgallery/redisCache");
-const redisClient = new RedisService();
 
+/**
+ * Contact model class for managing user contacts
+ * This class provides methods for adding, removing, and retrieving user contacts,
+ * as well as importing contacts from phone numbers and checking online status.
+ */
 class Contact {
   /**
-   * Add a new contact
-   * @param {UUID} userId - User ID
-   * @param {UUID} contactUserId - Contact user ID
-   * @returns {Object} - Created contact
+   * Add a new contact for a user
+   * @param {string} userId - The ID of the user adding the contact
+   * @param {string} contactUserId - The ID of the user to add as a contact
+   * @returns {Promise<Object>} - An object containing the contact ID and existence status
+   * @throws {Error} - Throws an error if the operation fails
    */
   static async addContact(userId, contactUserId) {
     try {
@@ -47,13 +51,10 @@ class Contact {
       const query = `
         INSERT INTO contacts (user_id, contact_user_id)
         VALUES ($1, $2)
-        RETURNING contact_id, created_at;
+          RETURNING contact_id, created_at;
       `;
 
       const contact = await sql(query, [userId, contactUserId]);
-
-      // Invalidate contacts cache
-      await redisClient.invalidate(`user:${userId}:contacts:*`);
 
       return { ...contact[0], already_exists: false };
     } catch (error) {
@@ -63,32 +64,21 @@ class Contact {
   }
 
   /**
-   * Remove a contact
-   * @param {UUID} userId - User ID
-   * @param {UUID} contactUserId - Contact user ID to remove
-   * @returns {boolean} - Success status
+   * Remove a contact from a user's contact list
+   * @param {string} userId - The ID of the user removing the contact
+   * @param {string} contactUserId - The ID of the user to remove as a contact
+   * @returns {Promise<boolean>} - True if the contact was successfully removed, false otherwise
+   * @throws {Error} - Throws an error if the operation fails
    */
   static async removeContact(userId, contactUserId) {
     try {
       const query = `
         DELETE FROM contacts
         WHERE user_id = $1 AND contact_user_id = $2
-        RETURNING contact_id;
+          RETURNING contact_id;
       `;
 
       const result = await sql(query, [userId, contactUserId]);
-
-      // Invalidate contacts cache
-      await redisClient.invalidate(`user:${userId}:contacts:*`);
-
-      // Invalidate conversation cache
-      const cachePattern = `conversation:*${[userId, contactUserId]
-        .sort()
-        .join(":*")}*`;
-      await redisClient.invalidate(cachePattern);
-
-      // Invalidate user conversations cache
-      await redisClient.invalidate(`user:${userId}:conversations:*`);
 
       return result.length > 0;
     } catch (error) {
@@ -98,26 +88,17 @@ class Contact {
   }
 
   /**
-   * Get all contacts for a user
-   * @param {UUID} userId - User ID
-   * @param {number} page - Page number
-   * @param {number} limit - Contacts per page
-   * @param {string} searchTerm - Optional search term
-   * @returns {Array} - List of contacts
+   * Get all contacts for a user with pagination and optional search
+   * @param {string} userId - The ID of the user whose contacts to retrieve
+   * @param {number} [page=1] - The page number for pagination
+   * @param {number} [limit=50] - The number of contacts per page
+   * @param {string} [searchTerm=""] - Optional search term to filter contacts
+   * @returns {Promise<Array>} - An array of contact objects with additional information
+   * @throws {Error} - Throws an error if the operation fails
    */
   static async getUserContacts(userId, page = 1, limit = 50, searchTerm = "") {
     try {
       const offset = (page - 1) * limit;
-
-      // Use cache if no search term
-      if (!searchTerm) {
-        const cacheKey = `user:${userId}:contacts:page${page}:limit${limit}`;
-        const cachedContacts = await redisClient.get(cacheKey);
-
-        if (cachedContacts) {
-          return cachedContacts;
-        }
-      }
 
       let query = `
         SELECT 
@@ -173,12 +154,6 @@ class Contact {
 
       const contacts = await sql(query, params);
 
-      // Cache results if no search term
-      if (!searchTerm) {
-        const cacheKey = `user:${userId}:contacts:page${page}:limit${limit}`;
-        await redisClient.set(cacheKey, contacts, 1800); // 30 minutes
-      }
-
       return contacts;
     } catch (error) {
       console.error("Error in getUserContacts:", error.message);
@@ -188,9 +163,10 @@ class Contact {
 
   /**
    * Import contacts from phone numbers
-   * @param {UUID} userId - User ID
-   * @param {Array} phoneNumbers - Array of phone numbers to import
-   * @returns {Object} - Import results
+   * @param {string} userId - The ID of the user importing contacts
+   * @param {Array<string>} phoneNumbers - An array of phone numbers to import
+   * @returns {Promise<Object>} - An object containing import statistics and contact information
+   * @throws {Error} - Throws an error if the operation fails
    */
   static async importFromPhoneNumbers(userId, phoneNumbers) {
     try {
@@ -206,14 +182,14 @@ class Contact {
 
       // Find registered users with these phone numbers
       const findQuery = `
-        SELECT 
-          id, 
+        SELECT
+          id,
           full_name,
           phone_number,
           profile_picture_url
         FROM users
         WHERE REGEXP_REPLACE(phone_number, '[^0-9]', '', 'g') = ANY($1)
-        AND id != $2;
+          AND id != $2;
       `;
 
       const foundUsers = await sql(findQuery, [formattedNumbers, userId]);
@@ -260,7 +236,7 @@ class Contact {
           const addQuery = `
             INSERT INTO contacts (user_id, contact_user_id)
             VALUES ($1, $2)
-            RETURNING contact_id;
+              RETURNING contact_id;
           `;
 
           const newContact = await sql(addQuery, [userId, user.id]);
@@ -277,20 +253,19 @@ class Contact {
         }
       }
 
-      // Invalidate contacts cache
-      await redisClient.invalidate(`user:${userId}:contacts:*`);
-
       return results;
     } catch (error) {
       console.error("Error in importFromPhoneNumbers:", error.message);
       throw error;
     }
   }
+
   /**
-   * Get online status for contacts
-   * @param {UUID} userId - User ID
-   * @param {Array} onlineUserIds - Array of online user IDs
-   * @returns {Array} - Contacts with online status
+   * Get contacts with online status information
+   * @param {string} userId - The ID of the user whose contacts to retrieve
+   * @param {Array<string>} onlineUserIds - An array of user IDs that are currently online
+   * @returns {Promise<Array>} - An array of contact objects with online status
+   * @throws {Error} - Throws an error if the operation fails
    */
   static async getContactsWithOnlineStatus(userId, onlineUserIds) {
     try {
