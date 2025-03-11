@@ -3,7 +3,7 @@ const http = require("http");
 const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
-// const { initializeDatabaseTables } = require("./config/database");
+const { initializeDatabaseTables } = require("./config/database");
 const authRoutes = require("./routes/authRoutes");
 const announcementRoutes = require("./routes/annoucements/annoucementsRoutes");
 const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
@@ -166,7 +166,7 @@ if (process.env.USE_REDIS === 'true') {
   const initialize = async () => {
     try {
       await 
-      // initializeDatabaseTables();
+      initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();

@@ -1,25 +1,35 @@
 const express = require('express');
 const { authMiddleware, requireAdmin } = require('../../middleware/authMiddleware');
-const SuggestionController = require('../../controllers/suggestions/suggestionsController');
+const SuggestionController = require('../../controllers/suggestions/suggestionsController'); // Fix this line
+const rateLimit = require('express-rate-limit');
+
 const router = express.Router();
 
-// Public routes (no authentication required)
+// Rate limiting configuration
+const suggestionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each user to 5 suggestions per window
+  message: 'Too many suggestions submitted, please try again later'
+});
+
+// Public routes
 router.get('/:id', SuggestionController.getSuggestionById);
 
-// User routes (require authentication)
-router.use(authMiddleware); // Apply authMiddleware to all routes below
-router.post('/', SuggestionController.createSuggestion);
-router.get('/user', SuggestionController.getUserSuggestions);
+// Authenticated user routes
+router.use(authMiddleware);
+router.post('/', suggestionLimiter, SuggestionController.createSuggestion);
+router.get('/user/suggestions', SuggestionController.getUserSuggestions);
 router.delete('/:id', SuggestionController.deleteSuggestion);
 
-// Admin routes (require admin privileges)
+// Admin routes
 const adminRouter = express.Router();
-adminRouter.use(requireAdmin); // Apply requireAdmin middleware to all admin routes
+adminRouter.use(requireAdmin);
+
+// Remove the duplicate requireAdmin middleware
+adminRouter.delete('/:id', SuggestionController.adminDeleteSuggestion);
 adminRouter.get('/', SuggestionController.getAllSuggestions);
-adminRouter.put('/:id', SuggestionController.updateSuggestion);
 adminRouter.post('/:id/response', SuggestionController.sendDirectResponse);
 
-// Mount admin routes under /admin
 router.use('/admin', adminRouter);
 
 module.exports = router;

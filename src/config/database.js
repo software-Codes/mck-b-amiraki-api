@@ -37,14 +37,22 @@ const createEnumTypes = async () => {
         END IF;
       END $$;`,
       `
-      DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_status') THEN
-          CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected');
-        END IF;
-      END $$; 
-
-    `,
-      // Add this to enumTypes
+-- Enum creation with proper existence checks
+DO $$ 
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_status') THEN
+    CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected', 'archived');
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_category') THEN
+    CREATE TYPE suggestion_category AS ENUM ('worship', 'events', 'facilities', 'youth', 'outreach', 'general');
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_urgency') THEN
+    CREATE TYPE suggestion_urgency AS ENUM ('low', 'normal', 'high', 'critical');
+  END IF;
+END $$;`,
+     // Enum creation with proper existence checks
       `DO $$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'message_status') THEN
   CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read', 'deleted');
@@ -355,63 +363,59 @@ const createMessagesTable = async () => {
 };
 const createSuggestionsTable = async () => {
   try {
-    // Create table
     await sql(`
       CREATE TABLE IF NOT EXISTS suggestions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL,
-        title VARCHAR(255) NOT NULL,
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         description TEXT NOT NULL,
+        category suggestion_category DEFAULT 'general',
+        urgency_level suggestion_urgency DEFAULT 'normal',
         status suggestion_status DEFAULT 'pending',
         admin_response TEXT,
+        admin_notes JSONB,
         is_anonymous BOOLEAN DEFAULT false,
-        reviewed_by UUID,
+        user_notification_preference BOOLEAN DEFAULT true,
+        reviewed_by UUID REFERENCES users(id),
+        is_archived BOOLEAN DEFAULT false,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         reviewed_at TIMESTAMP WITH TIME ZONE,
-        deleted_at TIMESTAMP WITH TIME ZONE,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (reviewed_by) REFERENCES users(id)
+        deleted_at TIMESTAMP WITH TIME ZONE
       );
     `);
 
-    // Create indexes separately
-    await sql(`
-      CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON suggestions(user_id);
-    `);
+    // Create indexes
+    const indexCommands = [
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON suggestions(user_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_category ON suggestions(category)`,
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_urgency ON suggestions(urgency_level)`,
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_is_archived ON suggestions(is_archived)`, // Fixed this line
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_anonymous ON suggestions(is_anonymous)`
+    ];
 
-    await sql(`
-      CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status);
-    `);
+    for (const command of indexCommands) {
+      await sql(command);
+    }
 
-    await sql(`
-      CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at);
-    `);
-
-    await sql(`
-      CREATE INDEX IF NOT EXISTS idx_suggestions_reviewed_at ON suggestions(reviewed_at);
-    `);
-
-    await sql(`
-      CREATE INDEX IF NOT EXISTS idx_suggestions_deleted ON suggestions(deleted_at);
-    `);
-
-    // Only create GIN index if pg_trgm extension is available
+    // Create advanced indexes
     try {
       await sql(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-      await sql(`
-        CREATE INDEX IF NOT EXISTS idx_suggestions_response 
-        ON suggestions USING GIN(admin_response gin_trgm_ops);
-      `);
+      await Promise.all([
+        sql`CREATE INDEX IF NOT EXISTS idx_suggestions_description 
+            ON suggestions USING GIN(description gin_trgm_ops)`,
+        sql`CREATE INDEX IF NOT EXISTS idx_suggestions_admin_notes 
+            ON suggestions USING GIN(admin_notes)`
+      ]);
     } catch (error) {
-      console.warn(
-        "pg_trgm extension not available, skipping GIN index creation"
-      );
+      console.warn("Advanced indexing error:", error.message);
     }
 
     console.log("Suggestions table created successfully");
   } catch (error) {
     console.error("Error creating suggestions table:", error.message);
+    throw error;
   }
 };
 

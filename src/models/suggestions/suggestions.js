@@ -1,426 +1,220 @@
 const { sql } = require("../../config/database");
-const {
-  sendEmail,
-  notifyAdmins,
-  notifyUser,
-} = require("../../utils/suggestionEmail");
+const { notifyAdmins, notifyUser } = require("../../utils/suggestionEmail");
+const { v4: uuidv4 } = require('uuid');
 
 class SuggestionModel {
   // Validation constants
-  static MIN_TITLE_LENGTH = 5;
-  static MAX_TITLE_LENGTH = 255;
   static MIN_DESCRIPTION_LENGTH = 20;
   static MAX_DESCRIPTION_LENGTH = 2000;
+  static CATEGORIES = ['worship', 'events', 'facilities', 'youth', 'outreach', 'general'];
+  static URGENCY_LEVELS = ['low', 'normal', 'high', 'critical'];
 
   /**
-   * Create a new suggestion
-   * @param {Object} params - Input parameters
-   * @param {string} params.userId - UUID of submitting user
-   * @param {string} params.title - Suggestion title
-   * @param {string} params.description - Detailed description
-   * @param {boolean} [params.isAnonymous=false] - Anonymous submission flag
+   * Create a new suggestion with enhanced features
+   * @param {Object} params
+   * @param {string} params.userId - Submitting user ID
+   * @param {string} params.description - Suggestion content
+   * @param {boolean} [params.isAnonymous=false] - Anonymous submission
+   * @param {string} [params.category='general'] - Suggestion category
+   * @param {string} [params.urgency='normal'] - Urgency level
+   * @param {boolean} [params.notifyUser=true] - User notification preference
    * @returns {Promise<Object>} Created suggestion
    */
   static async createSuggestion({
-                                  userId,
-                                  title,
-                                  description,
-                                  isAnonymous = false,
-                                }) {
+    userId,
+    description,
+    isAnonymous = false,
+    category = 'general',
+    urgency = 'normal',
+    notifyUser = true
+  }) {
     try {
-      // Validate input lengths
-      this.validateTitle(title);
+      // Validate inputs
       this.validateDescription(description);
+      this.validateCategory(category);
+      this.validateUrgency(urgency);
 
-      const result = await sql`
-        INSERT INTO suggestions(
-          user_id, title, description, is_anonymous
-        ) VALUES(
-                  ${userId}, ${title}, ${description}, ${isAnonymous}
-                ) RETURNING *
-      `;
+      const suggestionId = uuidv4();
+      
+      const result = await sql.begin(async sql => {
+        // Main suggestion insertion
+        const [suggestion] = await sql`
+          INSERT INTO suggestions (
+            id, user_id, description, is_anonymous,
+            category, urgency_level, user_notification_preference
+          ) VALUES (
+            ${suggestionId}, ${userId}, ${description}, ${isAnonymous},
+            ${category}, ${urgency}, ${notifyUser}
+          ) RETURNING *
+        `;
 
-      // Check if result exists and has rows
-      if (!result || !Array.isArray(result)) {
-        throw new Error('Invalid database response');
-      }
+        // Store notification history
+        await sql`
+          INSERT INTO suggestion_notifications (suggestion_id)
+          VALUES (${suggestionId})
+        `;
 
-      // Fire-and-forget email notifications
-      this.handlePostCreationEmails(result[0], userId, isAnonymous).catch(
-          (error) => console.error("Email notification failed:", error)
+        return suggestion;
+      });
+
+      // Async notifications
+      this.handleNotifications(result).catch(error => 
+        console.error("Notification error:", error)
       );
 
-      return result[0];
+      return result;
     } catch (error) {
       throw this.handleDatabaseError(error, "creating suggestion");
     }
   }
 
   /**
-   * Update suggestion status/admin response
-   * @param {Object} params - Update parameters
-   * @param {string} params.id - Suggestion UUID
-   * @param {string} params.status - New status
-   * @param {string} params.adminResponse - Admin comment
-   * @param {string} params.adminId - Admin UUID
-   * @returns {Promise<Object>} Updated suggestion
+   * Get suggestions for admin dashboard with filters
+   * @param {Object} filters - Filter criteria
+   * @param {number} page - Pagination page
+   * @param {number} limit - Items per page
+   * @returns {Promise<Object>} Filtered suggestions
    */
-  static async updateSuggestion({ id, status, adminResponse, adminId }) {
-    try {
-      this.validateStatus(status);
-
-      const result = await sql.begin(async (sql) => {
-        // Lock row for update
-        const suggestion = await sql`
-          SELECT * FROM suggestions 
-          WHERE id = ${id} FOR UPDATE
-        `;
-        if (!suggestion.rows.length) throw new Error("Suggestion not found");
-
-        return sql`
-          UPDATE suggestions SET
-            status = ${status},
-            admin_response = ${adminResponse},
-            reviewed_by = ${adminId},
-            reviewed_at = NOW(),
-            updated_at = NOW()
-          WHERE id = ${id}
-          RETURNING *
-        `;
-      });
-
-      this.handlePostUpdateEmails(result.rows[0]).catch((error) =>
-        console.error("Update notification failed:", error)
-      );
-
-      return result.rows[0];
-    } catch (error) {
-      throw this.handleDatabaseError(error, "updating suggestion");
-    }
-  }
-
-  /**
-   * Get paginated user suggestions
-   * @param {string} userId - UUID of the user
-   * @param {number} [page=1] - Pagination page
-   * @param {number} [limit=20] - Items per page
-   * @returns {Promise<Object>} { suggestions, total }
-   */
-  static async getUserSuggestions(userId, page = 1, limit = 20) {
+  static async getAdminDashboardSuggestions(filters = {}, page = 1, limit = 20) {
     try {
       const offset = (page - 1) * limit;
-
-      const result = await sql`
-          WITH user_suggestions AS (
-            SELECT * FROM suggestions 
-            WHERE user_id = ${userId}
-          )
-          SELECT 
-            (SELECT COUNT(*) FROM user_suggestions) AS total,
-            us.* 
-          FROM user_suggestions us
-          ORDER BY created_at DESC
-          LIMIT ${limit} OFFSET ${offset}
-        `;
-
-      return {
-        suggestions: result.rows,
-        total: result.rows[0]?.total || 0,
-      };
-    } catch (error) {
-      throw this.handleDatabaseError(error, "fetching user suggestions");
-    }
-  }
-
-  /**
-   * Get single suggestion with detailed information
-   * @param {string} id - Suggestion UUID
-   * @returns {Promise<Object>} Suggestion details
-   */
-  static async getSuggestionById(id) {
-    try {
-      const result = await sql`
-        SELECT 
-          s.*,
-          u.full_name as user_name,
-          a.full_name as reviewed_by_name,
-          u.email as user_email
-        FROM suggestions s
-        LEFT JOIN users u ON s.user_id = u.id
-        LEFT JOIN users a ON s.reviewed_by = a.id
-        WHERE s.id = ${id}
-      `;
-
-      if (result.rows.length === 0) {
-        throw new Error("Suggestion not found");
-      }
-
-      return result.rows[0];
-    } catch (error) {
-      throw this.handleDatabaseError(error, "fetching suggestion");
-    }
-  }
-
-  /**
-   * Delete a suggestion with ownership verification
-   * @param {string} suggestionId - Suggestion UUID
-   * @param {string} userId - User UUID requesting deletion
-   * @returns {Promise<Object>} Deleted suggestion
-   */
-  static async deleteSuggestion(suggestionId, userId) {
-    try {
-      return await sql.begin(async (sql) => {
-        // Verify ownership
-        const suggestion = await sql`
-          SELECT user_id FROM suggestions 
-          WHERE id = ${suggestionId} 
-          FOR UPDATE
-        `;
-
-        if (suggestion.rows.length === 0) {
-          throw new Error("Suggestion not found");
-        }
-
-        if (suggestion.rows[0].user_id !== userId) {
-          throw new Error("Unauthorized to delete this suggestion");
-        }
-
-        // Soft delete
-        const result = await sql`
-          UPDATE suggestions
-          SET deleted_at = NOW()
-          WHERE id = ${suggestionId}
-          RETURNING *
-        `;
-
-        // Notify admins asynchronously
-        this.notifyAdminsOfDeletion(result.rows[0]).catch((error) =>
-          console.error("Deletion notification failed:", error)
-        );
-
-        return result.rows[0];
-      });
-    } catch (error) {
-      throw this.handleDatabaseError(error, "deleting suggestion");
-    }
-  }
-  /**
-   * Send direct response to user (admin-only)
-   * @param {Object} params - Update parameters
-   * @param {string} params.suggestionId - Suggestion UUID
-   * @param {string} params.adminId - Admin UUID
-   * @param {string} params.message - Response message
-   * @param {boolean} [params.statusUpdate] - Whether to mark as reviewed
-   * @returns {Promise<Object>} Updated suggestion
-   */
-  static async sendDirectResponse({
-    suggestionId,
-    adminId,
-    message,
-    statusUpdate = false,
-  }) {
-    try {
-      return await sql.begin(async (sql) => {
-        // Verify admin role
-        const admin = await sql`
-            SELECT role FROM users 
-            WHERE id = ${adminId} AND role IN ('admin', 'super_admin')
-          `;
-
-        if (admin.rows.length === 0) {
-          throw new Error("Unauthorized: Admin privileges required");
-        }
-
-        const result = await sql`
-            UPDATE suggestions
-            SET
-              admin_response = COALESCE(admin_response || '\n\n', '') || ${message},
-              ${statusUpdate ? sql`status = 'reviewed',` : sql``}
-              reviewed_by = ${adminId},
-              reviewed_at = NOW(),
-              updated_at = NOW()
-            WHERE id = ${suggestionId}
-            RETURNING *
-          `;
-
-        await this.handlePostUpdateEmails(result.rows[0]);
-        return result.rows[0];
-      });
-    } catch (error) {
-      throw this.handleDatabaseError(error, "sending direct response");
-    }
-  }
-
-  /**
-   * Notify admins about suggestion deletion
-   * @param {Object} suggestion - Deleted suggestion
-   */
-  static async notifyAdminsOfDeletion(suggestion) {
-    try {
-      const admins = await sql`
-        SELECT email FROM users 
-        WHERE role IN ('admin', 'super_admin') AND is_verified = true
-      `;
-
-      await notifyAdmins(
-        {
-          ...suggestion,
-          deletedAt: new Date().toISOString(),
-          userName: suggestion.is_anonymous
-            ? "Anonymous User"
-            : await this.getUserName(suggestion.user_id),
-        },
-        admins.rows.map((a) => a.email),
-        "suggestionDeleted"
-      );
-    } catch (error) {
-      console.error("Failed to notify admins of deletion:", error);
-    }
-  }
-
-  /**
-   * Get paginated suggestions with filters
-   * @param {Object} [filters] - Filter options
-   * @param {string} [filters.status] - Filter by status
-   * @param {boolean} [filters.isAnonymous] - Filter anonymous
-   * @param {string} [filters.search] - Search in title/description
-   * @param {number} [page=1] - Pagination page
-   * @param {number} [limit=20] - Items per page
-   * @returns {Promise<Object>} { suggestions, total }
-   */
-  static async getAllSuggestions(filters = {}, page = 1, limit = 20) {
-    try {
-      const offset = (page - 1) * limit;
-      const { status, isAnonymous, search } = filters;
+      const { status, category, urgency, isArchived = false } = filters;
 
       const query = sql`
-        WITH filtered AS (
-          SELECT *
-          FROM suggestions
-          WHERE 1=1
-            ${status ? sql`AND status = ${status}` : sql``}
-            ${
-              isAnonymous !== undefined
-                ? sql`AND is_anonymous = ${isAnonymous}`
-                : sql``
-            }
-            ${
-              search
-                ? sql`AND (title ILIKE ${`%${search}%`} OR description ILIKE ${`%${search}%`})`
-                : sql``
-            }
-        )
         SELECT 
-          (SELECT COUNT(*) FROM filtered) AS total,
-          f.* 
-        FROM filtered f
-        ORDER BY created_at DESC
+          s.*,
+          u.email AS user_email,
+          u.full_name AS user_name,
+          COUNT(*) OVER() AS total_count
+        FROM suggestions s
+        LEFT JOIN users u ON s.user_id = u.id
+        WHERE s.deleted_at IS NULL
+          AND s.is_archived = ${isArchived}
+          ${status ? sql`AND s.status = ${status}` : sql``}
+          ${category ? sql`AND s.category = ${category}` : sql``}
+          ${urgency ? sql`AND s.urgency_level = ${urgency}` : sql``}
+        ORDER BY 
+          CASE s.urgency_level
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'normal' THEN 3
+            ELSE 4
+          END,
+          s.created_at DESC
         LIMIT ${limit} OFFSET ${offset}
       `;
 
       const result = await query;
       return {
-        suggestions: result.rows,
-        total: result.rows[0]?.total || 0,
+        suggestions: result,
+        total: result[0]?.total_count || 0,
+        page,
+        totalPages: Math.ceil((result[0]?.total_count || 0) / limit)
       };
     } catch (error) {
-      throw this.handleDatabaseError(error, "fetching suggestions");
+      throw this.handleDatabaseError(error, "fetching dashboard suggestions");
     }
   }
 
-  // ---------------------- Helper Methods ----------------------
+  /**
+   * Archive suggestion (admin only)
+   * @param {string} suggestionId 
+   * @param {string} adminId 
+   * @returns {Promise<Object>} Archived suggestion
+   */
+  static async archiveSuggestion(suggestionId, adminId) {
+    try {
+      return await sql.begin(async sql => {
+        // Verify admin privileges
+        const [admin] = await sql`
+          SELECT id FROM users 
+          WHERE id = ${adminId} AND role IN ('admin', 'super_admin')
+        `;
+        if (!admin) throw new Error("Admin not found");
 
-  static async handlePostCreationEmails(suggestion, userId, isAnonymous) {
-    const [admins, user] = await Promise.all([
-      sql`SELECT email FROM users WHERE role IN ('admin', 'super_admin')`,
-      isAnonymous
-        ? null
-        : sql`SELECT full_name, email FROM users WHERE id = ${userId}`,
-    ]);
+        const [suggestion] = await sql`
+          UPDATE suggestions
+          SET is_archived = true, updated_at = NOW()
+          WHERE id = ${suggestionId}
+          RETURNING *
+        `;
 
-    await notifyAdmins(
-      {
-        ...suggestion,
-        userName: user?.rows[0]?.full_name || "Anonymous User",
-        userEmail: user?.rows[0]?.email,
-      },
-      admins.rows.map((a) => a.email)
-    );
-  }
-  /** Get user name for notifications */
-  static async getUserName(userId) {
-    const user = await sql`
-      SELECT full_name FROM users WHERE id = ${userId}
-    `;
-    return user.rows[0]?.full_name || "User";
-  }
-  static async handlePostUpdateEmails(updatedSuggestion) {
-    const userDetails = await sql`
-      SELECT u.email, u.full_name 
-      FROM suggestions s
-      JOIN users u ON s.user_id = u.id
-      WHERE s.id = ${updatedSuggestion.id}
-    `;
+        // Add admin note
+        await sql`
+          UPDATE suggestions
+          SET admin_notes = jsonb_set(
+            COALESCE(admin_notes, '[]'::jsonb),
+            '{archived_by}', ${adminId}::jsonb
+          )
+          WHERE id = ${suggestionId}
+        `;
 
-    if (userDetails.rows.length) {
-      await notifyUser(
-        updatedSuggestion,
-        userDetails.rows[0].email,
-        userDetails.rows[0].full_name
-      );
+        return suggestion;
+      });
+    } catch (error) {
+      throw this.handleDatabaseError(error, "archiving suggestion");
     }
   }
 
-  static validateTitle(title) {
-    if (!title || title.length < this.MIN_TITLE_LENGTH) {
-      throw new Error(
-        `Title must be at least ${this.MIN_TITLE_LENGTH} characters`
-      );
-    }
-    if (title.length > this.MAX_TITLE_LENGTH) {
-      throw new Error(
-        `Title cannot exceed ${this.MAX_TITLE_LENGTH} characters`
-      );
-    }
-  }
-
+  // Validation methods
   static validateDescription(description) {
     if (!description || description.length < this.MIN_DESCRIPTION_LENGTH) {
-      throw new Error(
-        `Description must be at least ${this.MIN_DESCRIPTION_LENGTH} characters`
-      );
+      throw new Error(`Description must be at least ${this.MIN_DESCRIPTION_LENGTH} characters`);
     }
     if (description.length > this.MAX_DESCRIPTION_LENGTH) {
-      throw new Error(
-        `Description cannot exceed ${this.MAX_DESCRIPTION_LENGTH} characters`
-      );
+      throw new Error(`Description cannot exceed ${this.MAX_DESCRIPTION_LENGTH} characters`);
     }
   }
 
-  static validateStatus(status) {
-    const validStatuses = new Set([
-      "pending",
-      "reviewed",
-      "implemented",
-      "rejected",
-    ]);
-    if (!validStatuses.has(status)) {
-      throw new Error(
-        `Invalid status: ${status}. Valid values: ${[...validStatuses].join(
-          ", "
-        )}`
-      );
+  static validateCategory(category) {
+    if (!this.CATEGORIES.includes(category)) {
+      throw new Error(`Invalid category: ${category}`);
     }
   }
 
+  static validateUrgency(urgency) {
+    if (!this.URGENCY_LEVELS.includes(urgency)) {
+      throw new Error(`Invalid urgency level: ${urgency}`);
+    }
+  }
+
+  // Notification handler
+  static async handleNotifications(suggestion) {
+    try {
+      const [admins, user] = await Promise.all([
+        sql`SELECT email FROM users WHERE role IN ('admin', 'super_admin')`,
+        suggestion.is_anonymous 
+          ? null 
+          : sql`SELECT email, full_name FROM users WHERE id = ${suggestion.user_id}`
+      ]);
+
+      // Notify admins
+      await notifyAdmins({
+        suggestion,
+        adminEmails: admins.map(a => a.email),
+        dashboardLink: `${process.env.ADMIN_DASHBOARD_URL}/suggestions/${suggestion.id}`
+      });
+
+      // Notify user if requested and not anonymous
+      if (suggestion.user_notification_preference && user) {
+        await notifyUser({
+          userEmail: user.email,
+          userName: user.full_name,
+          suggestionId: suggestion.id,
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error("Notification system error:", error);
+      // Consider adding retry logic here
+    }
+  }
+
+  // Error handler
   static handleDatabaseError(error, context) {
-    console.error(`Database error while ${context}:`, error);
-    return new Error(
-      process.env.NODE_ENV === "production"
-        ? `Database operation failed`
-        : `Database error during ${context}: ${error.message}`
-    );
+    console.error(`Database Error (${context}):`, error);
+    return new Error(`Failed to complete operation: ${error.message}`);
   }
 }
 
-module.exports = { SuggestionModel };
+module.exports = SuggestionModel;

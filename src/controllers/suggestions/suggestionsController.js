@@ -1,64 +1,82 @@
 const { SuggestionModel } = require("../../models/suggestions/suggestions");
 const ValidationHelpers = require("../../utils/validationHelpers");
 
-/**
- * @namespace SuggestionController
- * @description Handles all suggestion-related HTTP requests and responses
- */
-const SuggestionController = {
-  /**
-   * @desc Create a new suggestion
-   * @route POST /api/suggestions
-   * @access Private
-   */
+class SuggestionController {
+  constructor() {
+    // Bind all methods
+    this.createSuggestion = this.createSuggestion.bind(this);
+    this.updateSuggestion = this.updateSuggestion.bind(this);
+    this.getUserSuggestions = this.getUserSuggestions.bind(this);
+    this.getSuggestionById = this.getSuggestionById.bind(this);
+    this.deleteSuggestion = this.deleteSuggestion.bind(this);
+    this.sendDirectResponse = this.sendDirectResponse.bind(this);
+    this.getAllSuggestions = this.getAllSuggestions.bind(this);
+    this.adminDeleteSuggestion = this.adminDeleteSuggestion.bind(this);
+  }
+
+  // Error handler method
+  handleError(res, error) {
+    console.error(`SuggestionController Error: ${error.message}`);
+
+    const errorMap = {
+      "Suggestion not found": 404,
+      "Unauthorized to delete this suggestion": 403,
+      "Unauthorized: Admin privileges required": 403,
+      "Database operation failed": 500,
+    };
+
+    const statusCode = errorMap[error.message] || 500;
+    const message =
+      statusCode === 500 && process.env.NODE_ENV === "production"
+        ? "Internal server error"
+        : error.message;
+
+    const response = {
+      success: false,
+      message,
+    };
+
+    if (process.env.NODE_ENV !== "production") {
+      response.error = {
+        message: error.message,
+        stack: error.stack,
+      };
+    }
+
+    res.status(statusCode).json(response);
+  }
+
+  // Create Suggestion
   async createSuggestion(req, res) {
     try {
       const { id: userId } = req.user;
-      const { title, description, isAnonymous = false } = req.body;
-
-      const validation = ValidationHelpers.validateSuggestionParams({
-        title,
-        description,
-        isAnonymous,
-      });
-
-      if (!validation.valid) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid suggestion parameters",
-          errors: validation.errors,
-        });
-      }
+      const { description, isAnonymous = false, category, urgency } = req.body;
 
       const suggestion = await SuggestionModel.createSuggestion({
         userId,
-        title,
         description,
         isAnonymous,
+        category: category || 'general',
+        urgency: urgency || 'normal'
       });
 
       res.status(201).json({
         success: true,
         message: "Suggestion submitted successfully",
-        data: suggestion,
+        data: suggestion
       });
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Update a suggestion (Admin only)
-   * @route PUT /api/suggestions/:id
-   * @access Private/Admin
-   */
+  // Update Suggestion
   async updateSuggestion(req, res) {
     try {
       const { id } = req.params;
       const { status, adminResponse } = req.body;
       const { id: adminId, role } = req.user;
 
-      // Validate UUID format
       if (!ValidationHelpers.isValidUUID(id)) {
         return res.status(400).json({
           success: false,
@@ -66,7 +84,6 @@ const SuggestionController = {
         });
       }
 
-      // Authorization check
       if (!["admin", "super_admin"].includes(role)) {
         return res.status(403).json({
           success: false,
@@ -102,13 +119,9 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Get paginated suggestions for a user
-   * @route GET /api/suggestions/user
-   * @access Private
-   */
+  // Get User Suggestions
   async getUserSuggestions(req, res) {
     try {
       const { id: userId } = req.user;
@@ -145,13 +158,9 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Get single suggestion by ID
-   * @route GET /api/suggestions/:id
-   * @access Public
-   */
+  // Get Suggestion By ID
   async getSuggestionById(req, res) {
     try {
       const { id } = req.params;
@@ -172,7 +181,6 @@ const SuggestionController = {
         });
       }
 
-      // Hide user information if anonymous
       if (suggestion.is_anonymous) {
         delete suggestion.user_email;
         delete suggestion.user_name;
@@ -185,13 +193,9 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Delete a suggestion
-   * @route DELETE /api/suggestions/:id
-   * @access Private
-   */
+  // Delete Suggestion
   async deleteSuggestion(req, res) {
     try {
       const { id: userId } = req.user;
@@ -217,13 +221,9 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Send direct response to user (Admin only)
-   * @route POST /api/suggestions/:id/response
-   * @access Private/Admin
-   */
+  // Send Direct Response
   async sendDirectResponse(req, res) {
     try {
       const { id: suggestionId } = req.params;
@@ -272,13 +272,9 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Get all suggestions with filters (Admin only)
-   * @route GET /api/suggestions
-   * @access Private/Admin
-   */
+  // Get All Suggestions
   async getAllSuggestions(req, res) {
     try {
       const { page = 1, limit = 20, ...filters } = req.query;
@@ -317,44 +313,25 @@ const SuggestionController = {
     } catch (error) {
       this.handleError(res, error);
     }
-  },
+  }
 
-  /**
-   * @desc Unified error handler for suggestion routes
-   * @param {Object} res - Express response object
-   * @param {Error} error - Thrown error
-   */
-  handleError(res, error) {
-    console.error(`SuggestionController Error: ${error.message}`);
-
-    const errorMap = {
-      "Suggestion not found": 404,
-      "Unauthorized to delete this suggestion": 403,
-      "Unauthorized: Admin privileges required": 403,
-      "Database operation failed": 500,
-    };
-
-    const statusCode = errorMap[error.message] || 500;
-    const message =
-      statusCode === 500 && process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : error.message;
-
-    const response = {
-      success: false,
-      message,
-    };
-
-    // Include error details in non-production environments
-    if (process.env.NODE_ENV !== "production") {
-      response.error = {
-        message: error.message,
-        stack: error.stack,
-      };
+  // Admin Delete Suggestion
+  async adminDeleteSuggestion(req, res) {
+    try {
+      const { id } = req.params;
+      const { id: adminId } = req.user;
+      
+      const result = await SuggestionModel.adminDeleteSuggestion(id, adminId);
+      res.json({
+        success: true,
+        message: "Suggestion permanently deleted",
+        data: result
+      });
+    } catch (error) {
+      this.handleError(res, error);
     }
+  }
+}
 
-    res.status(statusCode).json(response);
-  },
-};
-
-module.exports = SuggestionController;
+// Export as singleton instance
+module.exports = new SuggestionController();

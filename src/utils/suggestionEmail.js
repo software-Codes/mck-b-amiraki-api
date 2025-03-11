@@ -1,178 +1,113 @@
-const nodemailer = require("nodemailer");
-const dotenv = require("dotenv");
-dotenv.config();
+const nodemailer = require('nodemailer');
+const { html } = require('common-tags');
 
-//create transporter
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  service: 'gmail',
   auth: {
-    user: process.env.EMAIL_ACCOUNT || "collinsentrepreneur@gmail.com",
-    pass: process.env.EMAIL_PASSWORD || "ewpk ofve yoyo nhhn",
-  },
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
 });
 
-//email template
 const emailTemplates = {
-  newSuggestion: (suggestion) => ({
-    subject: "New Suggestion Received",
-    html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #333;">New Suggestion Submitted</h2>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p><strong>Title:</strong> ${suggestion.title}</p>
-            <p><strong>Description:</strong> ${suggestion.description}</p>
-            <p><strong>Submitted by:</strong> ${
-              suggestion.isAnonymous ? "Anonymous" : suggestion.userName
-            }</p>
-          </div>
-          <p style="color: #666;">You can review this suggestion in your admin dashboard.</p>
+  adminAlert: ({ suggestion, dashboardLink }) => ({
+    subject: `🚨 New ${suggestion.urgency_level} priority suggestion!`,
+    html: html`
+      <div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h3 style="color: #2c3e50;">New Suggestion Received</h3>
+        
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+          <p><strong>Category:</strong> ${suggestion.category}</p>
+          <p><strong>Urgency:</strong> 
+            <span style="color: ${
+              suggestion.urgency_level === 'critical' ? '#e74c3c' : 
+              suggestion.urgency_level === 'high' ? '#e67e22' : '#2ecc71'
+            };">
+              ${suggestion.urgency_level.toUpperCase()}
+            </span>
+          </p>
+          <p><strong>Submitted by:</strong> 
+            ${suggestion.is_anonymous ? 'Anonymous' : suggestion.user_name}
+          </p>
+          <hr style="border-color: #ddd;">
+          <p>${suggestion.description}</p>
         </div>
-      `,
-  }),
 
-  suggestionUpdate: (suggestion, userName) => ({
-    subject: "Your Suggestion Has Been Updated",
-    html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #333;">Hello ${userName},</h2>
-          <p>Your suggestion has been reviewed and updated.</p>
-          <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p><strong>Status:</strong> ${suggestion.status}</p>
-            <p><strong>Admin Response:</strong> ${suggestion.adminResponse}</p>
-          </div>
-          <p style="color: #666;">Thank you for your contribution to our community!</p>
+        <div style="margin-top: 25px; text-align: center;">
+          <a href="${dashboardLink}" 
+             style="background: #3498db; color: white; 
+                    padding: 12px 25px; border-radius: 5px; 
+                    text-decoration: none;">
+            View in Dashboard
+          </a>
         </div>
-      `,
-  }),
-  adminDashboardNotification: (suggestion) => ({
-    subject: "Suggestion Requires Review",
-    html: `
-    <div style="...">
-      <h2>New Suggestion Ready for Review</h2>
-      <p><strong>ID:</strong> ${suggestion.id}</p>
-      <p><strong>Submitted:</strong> ${new Date(
-        suggestion.created_at
-      ).toLocaleString()}</p>
-      <p>View in dashboard: ${process.env.DASHBOARD_URL}/suggestions/${
-      suggestion.id
-    }</p>
-    </div>
-  `,
-  }),
-  suggestionDeleted: (suggestion) => ({
-    subject: "Suggestion Deleted by User",
-    html: `
-    <div style="font-family: Arial, sans-serif; padding: 20px;">
-      <h3 style="color: #dc3545;">Suggestion Deleted</h3>
-      <p><strong>Title:</strong> ${suggestion.title}</p>
-      <p><strong>Deleted At:</strong> ${new Date(
-        suggestion.deletedAt
-      ).toLocaleString()}</p>
-      <p><strong>Original Submission Date:</strong> ${new Date(
-        suggestion.created_at
-      ).toLocaleString()}</p>
-      <p style="color: #666;">This suggestion was permanently deleted by the user.</p>
-    </div>
-  `,
-  }),
-  directResponse: (suggestion, userName) => ({
-    subject: "New Response to Your Suggestion",
-    html: `
-    <div style="font-family: Arial, sans-serif; padding: 20px;">
-      <h3>Hello ${userName},</h3>
-      <p>You've received a new response regarding your suggestion:</p>
-      <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px;">
-        <p><strong>Original Suggestion:</strong></p>
-        <p>${suggestion.title}</p>
-        <p>${suggestion.description}</p>
-        <hr>
-        <p><strong>Admin Response:</strong></p>
-        <p>${suggestion.directMessage}</p>
+
+        <p style="margin-top: 20px; color: #7f8c8d;">
+          This is an automated notification. Please do not reply directly.
+        </p>
       </div>
-      <p style="margin-top: 20px; color: #666;">
-        You can reply to this email directly or contact us through the app.
-      </p>
-    </div>
-  `,
+    `
   }),
-};
 
-// Main send email function
-const sendEmail = async ({ to, template, data, subject, html }) => {
-  try {
-    // Validate email address
-    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-      throw new Error("Invalid email address");
-    }
+  userConfirmation: ({ userName, suggestionId, timestamp }) => ({
+    subject: "✅ Suggestion Received!",
+    html: html`
+      <div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h3 style="color: #27ae60;">Thank you, ${userName}! for your suggestion to MCK Bishop Amiraki church  </h3>
+        <p>We've received your suggestion and our team will review it shortly.</p>
+        
+        <div style="background: #ecf7ed; padding: 15px; border-radius: 8px;">
+          <p><strong>Submission ID:</strong> ${suggestionId}</p>
+          <p><strong>Received at:</strong> 
+            ${new Date(timestamp).toLocaleString()}
+          </p>
+        </div>
 
-    let emailContent;
-    if (template && data) {
-      // Use template if provided
-      if (!emailTemplates[template]) {
-        throw new Error("Invalid email template");
-      }
-      emailContent = emailTemplates[template](data);
-    } else {
-      // Use direct subject and html if provided
-      emailContent = { subject, html };
-    }
+        <p style="margin-top: 20px; color: #7f8c8d;">
+          You'll receive another notification when your suggestion is reviewed.
 
-    // Send email
-    const info = await transporter.sendMail({
-      from:
-        process.env.SMTP_FROM || '"Church App" "collinsentrepreneur@gmail.com"',
-      to,
-      subject: emailContent.subject,
-      html: emailContent.html,
-    });
-
-    console.log("Email sent successfully:", info.messageId);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    console.error("Error sending email:", error);
-    throw new Error(`Failed to send email: ${error.message}`);
-  }
-};
-
-// Utility function to send suggestion notifications to all admins
-const notifyAdmins = async (suggestion, adminEmails) => {
-  try {
-    const emailPromises = adminEmails.map((email) =>
-      sendEmail({
-        to: email,
-        template: "newSuggestion",
-        data: suggestion,
-      })
-    );
-
-    await Promise.all(emailPromises);
-    return true;
-  } catch (error) {
-    console.error("Error notifying admins:", error);
-    throw new Error("Failed to notify admins");
-  }
-};
-
-// Utility function to notify user of suggestion update
- const notifyUser = async (suggestion, userEmail, userName) => {
-  try {
-    await sendEmail({
-      to: userEmail,
-      template: "suggestionUpdate",
-      data: {
-        ...suggestion,
-        userName,
-      },
-    });
-    return true;
-  } catch (error) {
-    console.error("Error notifying user:", error);
-    throw new Error("Failed to notify user");
-  }
+          If you have any questions, feel free to reply to this email.
+        </p>
+      </div>
+    `
+  })
 };
 
 module.exports = {
-  sendEmail,
-  notifyAdmins,
-  notifyUser,
-}
+  notifyAdmins: async ({ suggestion, adminEmails, dashboardLink }) => {
+    try {
+      const template = emailTemplates.adminAlert({ suggestion, dashboardLink });
+      
+      await transporter.sendMail({
+        from: `Church App <${process.env.EMAIL_USER}>`,
+        bcc: adminEmails,
+        subject: template.subject,
+        html: template.html,
+        priority: suggestion.urgency_level === 'critical' ? 'high' : 'normal'
+      });
+    } catch (error) {
+      console.error('Admin notification failed:', error);
+      throw new Error('Failed to send admin notifications');
+    }
+  },
+
+  notifyUser: async ({ userEmail, userName, suggestionId, timestamp }) => {
+    try {
+      const template = emailTemplates.userConfirmation({ 
+        userName, 
+        suggestionId, 
+        timestamp 
+      });
+
+      await transporter.sendMail({
+        from: `Church App <${process.env.EMAIL_USER}>`,
+        to: userEmail,
+        subject: template.subject,
+        html: template.html
+      });
+    } catch (error) {
+      console.error('User notification failed:', error);
+      throw new Error('Failed to send user confirmation');
+    }
+  }
+};
