@@ -242,7 +242,7 @@ class MediaContentController {
       res.json({ message: "Media content deleted successfully" });
     } catch (error) {
       console.error("Failed to delete media content:", error);
-      res.status(500).json({ error: "Failed to delete media content" });
+      res.status(500).json({ error: "Failed to delete media content", message: error.message });
     }
   }
 }

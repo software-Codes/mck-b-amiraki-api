@@ -70,7 +70,7 @@ class MediaContent {
     const query = `
       SELECT mc.*, u.full_name as uploader_name 
       FROM media_contents mc
-      JOIN users u ON mc.uploaded_by = u.id, u.full_name
+      JOIN users u ON mc.uploaded_by = u.id
       WHERE mc.id = $1 AND mc.deleted_at IS NULL
     `;
     const result = await sql(query, [id]);

@@ -30,7 +30,16 @@ class AzureStorageService {
   }
 
   async deleteFile(url) {
-    const blobName = url.split("/").pop();
+    const urlObj = new URL(url);
+    const pathSegments = urlObj.pathname.split('/').filter(segment => segment !== '');
+    let blobName = pathSegments.slice(1).join('/');
+  
+    // Handle legacy URLs saved without directories
+    if (!blobName.includes('/')) {
+      blobName = `image/${blobName}`; // or `video/...` if known
+      blobName = `video/${blobName}`;
+    }
+  
     const blockBlobClient = this.containerClient.getBlockBlobClient(blobName);
     await blockBlobClient.delete();
   }
