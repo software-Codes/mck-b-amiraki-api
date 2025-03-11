@@ -25,9 +25,11 @@ class MediaContent {
         updated_at
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-      RETURNING *
+      RETURNING id, title, description, content_type, url, thumbnail_url, 
+        uploaded_by, size, duration, created_at, updated_at,
+        (SELECT name FROM users WHERE id = $6) AS uploaded_by_name
     `;
-
+  
     const result = await sql(query, [
       title,
       description,
@@ -38,10 +40,9 @@ class MediaContent {
       size,
       duration,
     ]);
-
+  
     return result[0];
   }
-
   static async findAll({ page = 1, limit = 10, contentType = null }) {
     const offset = (page - 1) * limit;
     let query = `
@@ -69,7 +70,7 @@ class MediaContent {
     const query = `
       SELECT mc.*, u.full_name as uploader_name 
       FROM media_contents mc
-      JOIN users u ON mc.uploaded_by = u.id
+      JOIN users u ON mc.uploaded_by = u.id, u.full_name
       WHERE mc.id = $1 AND mc.deleted_at IS NULL
     `;
     const result = await sql(query, [id]);
