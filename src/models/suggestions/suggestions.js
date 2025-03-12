@@ -33,12 +33,12 @@ class SuggestionModel {
       this.validateDescription(description);
       this.validateCategory(category);
       this.validateUrgency(urgency);
-
+  
       const suggestionId = uuidv4();
       
-      const result = await sql.begin(async sql => {
+      const result = await sql.transaction(async (tx) => {
         // Main suggestion insertion
-        const [suggestion] = await sql`
+        const [suggestion] = await tx`
           INSERT INTO suggestions (
             id, user_id, description, is_anonymous,
             category, urgency_level, user_notification_preference
@@ -47,21 +47,21 @@ class SuggestionModel {
             ${category}, ${urgency}, ${notifyUser}
           ) RETURNING *
         `;
-
+  
         // Store notification history
-        await sql`
+        await tx`
           INSERT INTO suggestion_notifications (suggestion_id)
           VALUES (${suggestionId})
         `;
-
+  
         return suggestion;
       });
-
+  
       // Async notifications
       this.handleNotifications(result).catch(error => 
         console.error("Notification error:", error)
       );
-
+  
       return result;
     } catch (error) {
       throw this.handleDatabaseError(error, "creating suggestion");
@@ -124,23 +124,23 @@ class SuggestionModel {
    */
   static async archiveSuggestion(suggestionId, adminId) {
     try {
-      return await sql.begin(async sql => {
+      return await sql.transaction(async (tx) => {
         // Verify admin privileges
-        const [admin] = await sql`
+        const [admin] = await tx`
           SELECT id FROM users 
           WHERE id = ${adminId} AND role IN ('admin', 'super_admin')
         `;
         if (!admin) throw new Error("Admin not found");
-
-        const [suggestion] = await sql`
+  
+        const [suggestion] = await tx`
           UPDATE suggestions
           SET is_archived = true, updated_at = NOW()
           WHERE id = ${suggestionId}
           RETURNING *
         `;
-
+  
         // Add admin note
-        await sql`
+        await tx`
           UPDATE suggestions
           SET admin_notes = jsonb_set(
             COALESCE(admin_notes, '[]'::jsonb),
@@ -148,7 +148,7 @@ class SuggestionModel {
           )
           WHERE id = ${suggestionId}
         `;
-
+  
         return suggestion;
       });
     } catch (error) {

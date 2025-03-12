@@ -1,4 +1,4 @@
-const { SuggestionModel } = require("../../models/suggestions/suggestions");
+const SuggestionModel  = require("../../models/suggestions/suggestions");
 const ValidationHelpers = require("../../utils/validationHelpers");
 
 class SuggestionController {

@@ -72,20 +72,28 @@ END $$;`,
 const createUsersTable = async () => {
   try {
     await sql(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        full_name VARCHAR(100) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password VARCHAR(255),
-        phone_number VARCHAR(20),
-        role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('member', 'admin', 'super_admin')),
-        auth_provider auth_provider DEFAULT 'manual',
-        google_id VARCHAR(255) UNIQUE,
-        profile_picture_url TEXT,
-        is_verified BOOLEAN DEFAULT false,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name VARCHAR(100) NOT NULL,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password VARCHAR(255),
+  phone_number VARCHAR(20),
+  role VARCHAR(20) DEFAULT 'member' CHECK (role IN ('member', 'admin', 'super_admin')),
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  is_super_admin BOOLEAN DEFAULT false,
+  verification_code VARCHAR(6),
+  verification_code_expires_at TIMESTAMPTZ,
+  last_login TIMESTAMPTZ,
+  token_invalidated_at TIMESTAMPTZ,
+  password_changed_at TIMESTAMPTZ,
+  profile_photo TEXT,
+  auth_provider auth_provider DEFAULT 'manual',
+  google_id VARCHAR(255) UNIQUE,
+  is_verified BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
     `);
     console.log("Users table created successfully");
   } catch (error) {
@@ -361,64 +369,49 @@ const createMessagesTable = async () => {
     console.error("Error creating messages table:", error.message);
   }
 };
+// Update suggestions table
+// Fixed the suggestions table index creation
 const createSuggestionsTable = async () => {
   try {
     await sql(`
-      CREATE TABLE IF NOT EXISTS suggestions (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        description TEXT NOT NULL,
-        category suggestion_category DEFAULT 'general',
-        urgency_level suggestion_urgency DEFAULT 'normal',
-        status suggestion_status DEFAULT 'pending',
-        admin_response TEXT,
-        admin_notes JSONB,
-        is_anonymous BOOLEAN DEFAULT false,
-        user_notification_preference BOOLEAN DEFAULT true,
-        reviewed_by UUID REFERENCES users(id),
-        is_archived BOOLEAN DEFAULT false,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        reviewed_at TIMESTAMP WITH TIME ZONE,
-        deleted_at TIMESTAMP WITH TIME ZONE
+CREATE TABLE IF NOT EXISTS suggestions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  category suggestion_category DEFAULT 'general',
+  urgency_level suggestion_urgency DEFAULT 'normal',
+  status suggestion_status DEFAULT 'pending',
+  admin_response TEXT,
+  admin_notes JSONB,
+  is_anonymous BOOLEAN DEFAULT false,
+  user_notification_preference BOOLEAN DEFAULT true,
+  reviewed_by UUID REFERENCES users(id),
+  is_archived BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  deleted_at TIMESTAMP WITH TIME ZONE
       );
     `);
 
-    // Create indexes
+    // Create indexes - fixed is_archived reference
     const indexCommands = [
       `CREATE INDEX IF NOT EXISTS idx_suggestions_user_id ON suggestions(user_id)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_status ON suggestions(status)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_category ON suggestions(category)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_urgency ON suggestions(urgency_level)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at)`,
-      `CREATE INDEX IF NOT EXISTS idx_suggestions_is_archived ON suggestions(is_archived)`, // Fixed this line
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_is_archived ON suggestions(is_archived)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_anonymous ON suggestions(is_anonymous)`
     ];
 
     for (const command of indexCommands) {
       await sql(command);
     }
-
-    // Create advanced indexes
-    try {
-      await sql(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
-      await Promise.all([
-        sql`CREATE INDEX IF NOT EXISTS idx_suggestions_description 
-            ON suggestions USING GIN(description gin_trgm_ops)`,
-        sql`CREATE INDEX IF NOT EXISTS idx_suggestions_admin_notes 
-            ON suggestions USING GIN(admin_notes)`
-      ]);
-    } catch (error) {
-      console.warn("Advanced indexing error:", error.message);
-    }
-
-    console.log("Suggestions table created successfully");
   } catch (error) {
     console.error("Error creating suggestions table:", error.message);
-    throw error;
   }
-};
-
+}
 const createMediaContentsTable = async () => {
   try {
     // Create the content_type enum type if it doesn't exist
@@ -432,24 +425,24 @@ const createMediaContentsTable = async () => {
 
     // Create the media_contents table
     await sql(`
-      CREATE TABLE IF NOT EXISTS media_contents (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        title VARCHAR(255) NOT NULL,
-        description TEXT NOT NULL,
-        content_type content_type NOT NULL,
-        url TEXT NOT NULL,
-        thumbnail_url TEXT,
-        uploaded_by UUID NOT NULL REFERENCES users(id),
-        size BIGINT NOT NULL,clear
-        duration INTEGER,
-        views_count INTEGER DEFAULT 0,
-        deleted_at TIMESTAMP WITH TIME ZONE,
-        deleted_by UUID REFERENCES users(id),
-        is_attached BOOLEAN DEFAULT true,
-                message_id UUID REFERENCES messages(message_id) ON DELETE SET NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
+CREATE TABLE IF NOT EXISTS media_contents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  content_type content_type NOT NULL,
+  url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  uploaded_by UUID NOT NULL REFERENCES users(id),
+  size BIGINT NOT NULL,
+  duration INTEGER,
+  views_count INTEGER DEFAULT 0,
+  deleted_at TIMESTAMPTZ,
+  deleted_by UUID REFERENCES users(id),
+  is_attached BOOLEAN DEFAULT true,
+  message_id UUID,  -- remove FK constraint here
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
     `);
 
     // Create indexes for media_contents table
