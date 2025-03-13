@@ -150,7 +150,7 @@ deploy_container_app() {
     local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
     local repo_url="https://github.com/mckBishopAmirakiChurch-App/backendclone"
 
-    local branch="main"
+    local branch="dev-api"
 
     log_info "Deploying Container App: $container_app_name"
 
