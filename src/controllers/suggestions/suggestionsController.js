@@ -51,7 +51,7 @@ class SuggestionController {
     try {
       const { id: userId } = req.user;
       const { description, isAnonymous = false, category, urgency } = req.body;
-
+  
       const suggestion = await SuggestionModel.createSuggestion({
         userId,
         description,
@@ -59,7 +59,7 @@ class SuggestionController {
         category: category || 'general',
         urgency: urgency || 'normal'
       });
-
+  
       res.status(201).json({
         success: true,
         message: "Suggestion submitted successfully",

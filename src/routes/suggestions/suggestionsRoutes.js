@@ -18,7 +18,7 @@ router.get('/:id', SuggestionController.getSuggestionById);
 // Authenticated user routes
 router.use(authMiddleware);
 router.post('/', suggestionLimiter, SuggestionController.createSuggestion);
-router.get('/user/suggestions', SuggestionController.getUserSuggestions);
+router.get('/', SuggestionController.getUserSuggestions);
 router.delete('/:id', SuggestionController.deleteSuggestion);
 
 // Admin routes

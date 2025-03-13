@@ -424,16 +424,25 @@ class SuggestionModel {
           ? null 
           : sql`SELECT email, full_name FROM users WHERE id = ${suggestion.user_id}`
       ]);
-
-      // Notify admins
-      await notifyAdmins({
-        suggestion,
-        adminEmails: admins.map(a => a.email),
-        dashboardLink: `${process.env.ADMIN_DASHBOARD_URL}/suggestions/${suggestion.id}`
-      });
-
+  
+      // Notify admins if there are any
+      if (admins.length > 0) {
+        await notifyAdmins({
+          suggestion,
+          adminEmails: admins.map(a => a.email),
+          dashboardLink: `${process.env.ADMIN_DASHBOARD_URL}/suggestions/${suggestion.id}`
+        });
+      } else {
+        console.warn("No admin emails found to notify");
+      }
+  
       // Notify user if requested and not anonymous
       if (suggestion.user_notification_preference && user) {
+        if (!user.email || user.email.trim() === '') {
+          console.warn(`User ${user.full_name} has no valid email address`);
+          return;
+        }
+  
         await notifyUser({
           userEmail: user.email,
           userName: user.full_name,
@@ -444,9 +453,10 @@ class SuggestionModel {
     } catch (error) {
       console.error("Notification system error:", error);
       // Consider adding retry logic here
+      throw new Error("Failed to send notifications");
+      
     }
   }
-
   // Status update notification handler
   static async handleStatusUpdateNotification(suggestion, user) {
     try {

@@ -4,9 +4,9 @@ const { html } = require('common-tags');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
+    user: process.env.EMAIL_ACCOUNT || "collinsentrepreneur@gmail.com",
+    pass: process.env.EMAIL_PASSWORD || "ewpk ofve yoyo nhhn",
+  },
 });
 
 const emailTemplates = {
@@ -73,14 +73,24 @@ const emailTemplates = {
   })
 };
 
+const validateEmail = (email) => {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+};
+
 module.exports = {
   notifyAdmins: async ({ suggestion, adminEmails, dashboardLink }) => {
     try {
+      if (!adminEmails || adminEmails.length === 0) {
+        console.warn("No admin emails provided for notification");
+        return;
+      }
+
       const template = emailTemplates.adminAlert({ suggestion, dashboardLink });
       
       await transporter.sendMail({
         from: `Church App <${process.env.EMAIL_USER}>`,
-        bcc: adminEmails,
+        bcc: adminEmails.join(','),
         subject: template.subject,
         html: template.html,
         priority: suggestion.urgency_level === 'critical' ? 'high' : 'normal'
@@ -93,6 +103,11 @@ module.exports = {
 
   notifyUser: async ({ userEmail, userName, suggestionId, timestamp }) => {
     try {
+      if (!userEmail || !validateEmail(userEmail)) {
+        console.error(`Invalid user email address: ${userEmail}`);
+        throw new Error('Invalid user email address');
+      }
+
       const template = emailTemplates.userConfirmation({ 
         userName, 
         suggestionId, 

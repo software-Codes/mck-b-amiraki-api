@@ -1,6 +1,5 @@
 const dotenv = require("dotenv");
 const { neon } = require("@neondatabase/serverless");
-const { Console } = require("winston/lib/winston/transports");
 dotenv.config();
 
 const sql = neon(process.env.DATABASE_URL);
