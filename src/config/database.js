@@ -1,5 +1,6 @@
 const dotenv = require("dotenv");
 const { neon } = require("@neondatabase/serverless");
+const { Console } = require("winston/lib/winston/transports");
 dotenv.config();
 
 const sql = neon(process.env.DATABASE_URL);
@@ -392,6 +393,7 @@ CREATE TABLE IF NOT EXISTS suggestions (
   reviewed_at TIMESTAMP WITH TIME ZONE,
   deleted_at TIMESTAMP WITH TIME ZONE
       );
+
     `);
 
     // Create indexes - fixed is_archived reference
@@ -408,6 +410,7 @@ CREATE TABLE IF NOT EXISTS suggestions (
     for (const command of indexCommands) {
       await sql(command);
     }
+    console.log("Suggestions table created successfully");
   } catch (error) {
     console.error("Error creating suggestions table:", error.message);
   }
@@ -461,7 +464,29 @@ CREATE TABLE IF NOT EXISTS media_contents (
     console.error("Error creating media contents table:", error.message);
   }
 };
+const createSuggestionNotificationsTable = async () => {
+  try {
+    await sql(`
+      CREATE TABLE IF NOT EXISTS suggestion_notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        suggestion_id UUID NOT NULL REFERENCES suggestions(id) ON DELETE CASCADE,
+        admin_notified BOOLEAN DEFAULT false,
+        user_notified BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
 
+    await sql(`
+      CREATE INDEX IF NOT EXISTS idx_suggestion_notifications_suggestion_id 
+      ON suggestion_notifications(suggestion_id);
+    `);
+
+    console.log("Suggestion notifications table created successfully");
+  } catch (error) {
+    console.error("Error creating suggestion notifications table:", error.message);
+  }
+};
 const initializeDatabaseTables = async () => {
   try {
     await createEnumTypes();
@@ -476,6 +501,7 @@ const initializeDatabaseTables = async () => {
     await createMediaContentsTable();
     await createContactsTable();
     await createMessagesTable();
+    await createSuggestionNotificationsTable();
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);
@@ -496,5 +522,6 @@ module.exports = {
   createSuggestionsTable,
   createMediaContentsTable,
   createContactsTable,
+  createSuggestionNotificationsTable,
   createMessagesTable,
 };

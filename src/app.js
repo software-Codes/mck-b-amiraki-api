@@ -166,7 +166,7 @@ if (process.env.USE_REDIS === 'true') {
   const initialize = async () => {
     try {
       await 
-      initializeDatabaseTables();
+      // initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
       setupErrorHandler();
