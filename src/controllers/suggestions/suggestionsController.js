@@ -314,6 +314,31 @@ class SuggestionController {
       this.handleError(res, error);
     }
   }
+  // Admin Archive Suggestion
+  
+  async archiveSuggestion(req, res) {
+    try {
+      const { id: suggestionId } = req.params;
+      const { id: adminId } = req.user;
+
+      if (!ValidationHelpers.isValidUUID(suggestionId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Invalid suggestion ID" 
+        });
+      }
+
+      const archived = await SuggestionModel.archiveSuggestion(suggestionId, adminId);
+      
+      res.json({
+        success: true,
+        message: "Suggestion archived successfully",
+        data: archived
+      });
+    } catch (error) {
+      this.handleError(res, error);
+    }
+  }
 
   // Admin Delete Suggestion
   async adminDeleteSuggestion(req, res) {
