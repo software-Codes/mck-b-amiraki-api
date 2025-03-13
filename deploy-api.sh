@@ -148,9 +148,9 @@ deploy_container_app() {
     local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv"
     local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
     local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
-    local repo_url="https://github.com/mckBishopAmirakiChurch-App/backendclone"
+    local repo_url="https://github.com/CollinsMunene-Developer/amiraki-development"
 
-    local branch="dev-api"
+    local branch="main"
 
     log_info "Deploying Container App: $container_app_name"
 
