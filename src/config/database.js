@@ -43,11 +43,6 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_status') THEN
     CREATE TYPE suggestion_status AS ENUM ('pending', 'reviewed', 'implemented', 'rejected', 'archived');
   END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_category') THEN
-    CREATE TYPE suggestion_category AS ENUM ('worship', 'events', 'facilities', 'youth', 'outreach', 'general');
-  END IF;
-  
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'suggestion_urgency') THEN
     CREATE TYPE suggestion_urgency AS ENUM ('low', 'normal', 'high', 'critical');
   END IF;

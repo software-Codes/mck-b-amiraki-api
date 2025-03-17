@@ -98,18 +98,28 @@ const adminRouter = express.Router();
 adminRouter.use(requireAdmin); // All admin routes require admin privileges
 
 /**
- * @desc    Admin - Get all suggestions
- * @route   GET /api/suggestions/admin
+ * @desc    Admin - Get suggestion statistics
+ * @route   GET /api/suggestions/admin/stats
  * @access  Private/Admin
  */
 adminRouter.get(
-  '/', 
-  validate.adminSuggestionFilters,
-  SuggestionController.getAllSuggestions
+  '/stats', 
+  SuggestionController.getSuggestionStats
 );
 
 /**
- * @desc    Admin - Delete any suggestion
+ * @desc    Admin - Get single suggestion by ID
+ * @route   GET /api/suggestions/admin/:id
+ * @access  Private/Admin
+ */
+adminRouter.get(
+  '/:id', 
+  validate.suggestionId,
+  SuggestionController.getSuggestionById
+);
+
+/**
+ * @desc    Admin - Permanently delete a suggestion
  * @route   DELETE /api/suggestions/admin/:id
  * @access  Private/Admin
  */
@@ -117,17 +127,6 @@ adminRouter.delete(
   '/:id', 
   validate.suggestionId,
   SuggestionController.adminDeleteSuggestion
-);
-
-/**
- * @desc    Admin - Send direct response to suggestion
- * @route   POST /api/suggestions/admin/:id/response
- * @access  Private/Admin
- */
-adminRouter.post(
-  '/:id/response', 
-  validate.suggestionResponse,
-  SuggestionController.sendDirectResponse
 );
 
 // Mount admin routes
