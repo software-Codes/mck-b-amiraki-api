@@ -1,149 +1,125 @@
-// src/middleware/validationMiddleware.js
-const { body } = require('express-validator');
-const { validationResult } = require('express-validator');
+const { body, query, param, validationResult } = require('express-validator');
+const { APIError } = require('../utils/errorHandler/suggestions-errohandler');
 
-// Validation middleware
+/**
+ * Middleware to validate request data
+ * @param {Array} validations - Array of validation chains
+ * @returns {Function} Express middleware
+ */
 const validate = (validations) => {
   return async (req, res, next) => {
-    await Promise.all(validations.map((validation) => validation.run(req)));
+    await Promise.all(validations.map(validation => validation.run(req)));
 
     const errors = validationResult(req);
     if (errors.isEmpty()) {
       return next();
     }
 
-    res.status(400).json({
-      status: 'error',
-      errors: errors.array(),
-    });
+    const extractedErrors = errors.array().map(err => ({
+      [err.param]: err.msg
+    }));
+
+    return next(new APIError('Validation failed', 400, { errors: extractedErrors }));
   };
 };
 
-// Registration validation rules
-const registerValidation = [
-    body('fullName')
-      .trim()
-      .notEmpty()
-      .withMessage('Full name is required')
-      .isLength({ min: 2, max: 100 })
-      .withMessage('Full name must be between 2 and 100 characters'),
-  
-    body('email')
-      .trim()
-      .notEmpty()
-      .withMessage('Email is required')
-      .isEmail()
-      .withMessage('Invalid email address')
-      .normalizeEmail(),
-  
-    body('password')
-      .notEmpty()
-      .withMessage('Password is required')
-      .isLength({ min: 8 })
-      .withMessage('Password must be at least 8 characters long')
-      .matches(/\d/)
-      .withMessage('Password must contain a number')
-      .matches(/[A-Z]/)
-      .withMessage('Password must contain an uppercase letter')
-      .matches(/[a-z]/)
-      .withMessage('Password must contain a lowercase letter')
-      .matches(/[!@#$%^&*(),.?":{}|<>]/)
-      .withMessage('Password must contain a special character'),
-  
-    body('phoneNumber')
-      .notEmpty()
-      .withMessage('Phone number is required')
-      .custom((value) => {
-        // Accept formats: +254XXXXXXXXX, 254XXXXXXXXX, 07XXXXXXXX, 01XXXXXXXX
-        const phoneRegex = /^(?:\+254|254|0)[17][0-9]{8}$/;
-        if (!phoneRegex.test(value)) {
-          throw new Error('Invalid phone number format. Use Kenyan format: +254XXXXXXXXX or 07XXXXXXXX');
-        }
-        return true;
-      }),
+const validationMiddleware = {
+  // Validate suggestion creation
+  createSuggestion: validate([
+    body('description')
+      .notEmpty().withMessage('Description is required')
+      .isString().withMessage('Description must be a string')
+      .isLength({ min: 10, max: 1000 }).withMessage('Description must be between 10 and 1000 characters'),
+    body('category')
+      .optional()
+      .isString().withMessage('Category must be a string')
+      .isIn(['general', 'feature', 'bug', 'improvement']).withMessage('Invalid category'),
+    body('urgency')
+      .optional()
+      .isString().withMessage('Urgency must be a string')
+      .isIn(['low', 'normal', 'high', 'critical']).withMessage('Invalid urgency level'),
+    body('notifyUser')
+      .optional()
+      .isBoolean().withMessage('notifyUser must be a boolean')
+  ]),
 
-  ];
-  
+  // Validate pagination parameters
+  paginationParams: validate([
+    query('page')
+      .optional()
+      .isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit')
+      .optional()
+      .isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+    query('sortBy')
+      .optional()
+      .isString().withMessage('sortBy must be a string')
+      .isIn(['created_at', 'updated_at', 'urgency', 'category']).withMessage('Invalid sort field'),
+    query('sortDirection')
+      .optional()
+      .isString().withMessage('sortDirection must be a string')
+      .isIn(['asc', 'desc']).withMessage('Sort direction must be asc or desc')
+  ]),
 
-// Login validation rules
-const loginValidation = [
-  body('email')
-    .trim()
-    .notEmpty()
-    .withMessage('Email is required')
-    .isEmail()
-    .withMessage('Invalid email address')
-    .normalizeEmail(),
+  // Validate suggestion ID
+  suggestionId: validate([
+    param('id')
+      .notEmpty().withMessage('Suggestion ID is required')
+      .isMongoId().withMessage('Invalid suggestion ID format')
+  ]),
 
-  body('password')
-    .notEmpty()
-    .withMessage('Password is required'),
-];
+  // Validate admin suggestion filters
+  adminSuggestionFilters: validate([
+    query('page')
+      .optional()
+      .isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit')
+      .optional()
+      .isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+    query('sortBy')
+      .optional()
+      .isString().withMessage('sortBy must be a string')
+      .isIn(['created_at', 'updated_at', 'urgency', 'category', 'status']).withMessage('Invalid sort field'),
+    query('sortDirection')
+      .optional()
+      .isString().withMessage('sortDirection must be a string')
+      .isIn(['asc', 'desc']).withMessage('Sort direction must be asc or desc'),
+    query('status')
+      .optional()
+      .isString().withMessage('Status must be a string')
+      .isIn(['pending', 'in_progress', 'completed', 'rejected']).withMessage('Invalid status'),
+    query('category')
+      .optional()
+      .isString().withMessage('Category must be a string')
+      .isIn(['general', 'feature', 'bug', 'improvement']).withMessage('Invalid category'),
+    query('urgency')
+      .optional()
+      .isString().withMessage('Urgency must be a string')
+      .isIn(['low', 'normal', 'high', 'critical']).withMessage('Invalid urgency level'),
+    query('userId')
+      .optional()
+      .isMongoId().withMessage('Invalid user ID format'),
+    query('fromDate')
+      .optional()
+      .isISO8601().withMessage('fromDate must be a valid date'),
+    query('toDate')
+      .optional()
+      .isISO8601().withMessage('toDate must be a valid date')
+  ]),
 
-// Profile update validation rules
-const updateProfileValidation = [
-  body('fullName')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Full name must be between 2 and 100 characters'),
-
-  body('phoneNumber')
-    .optional()
-    .matches(/^\+?[\d\s-]+$/)
-    .withMessage('Invalid phone number format'),
-];
-
-// Password change validation rules
-const changePasswordValidation = [
-  body('currentPassword')
-    .notEmpty()
-    .withMessage('Current password is required'),
-
-  body('newPassword')
-    .notEmpty()
-    .withMessage('New password is required')
-    .isLength({ min: 8 })
-    .withMessage('New password must be at least 8 characters long')
-    .matches(/\d/)
-    .withMessage('New password must contain a number')
-    .matches(/[A-Z]/)
-    .withMessage('New password must contain an uppercase letter')
-    .matches(/[a-z]/)
-    .withMessage('New password must contain a lowercase letter')
-    .matches(/[!@#$%^&*(),.?":{}|<>]/)
-    .withMessage('New password must contain a special character')
-    .custom((value, { req }) => {
-      if (value === req.body.currentPassword) {
-        throw new Error('New password must be different from current password');
-      }
-      return true;
-    }),
-
-  body('confirmNewPassword').custom((value, { req }) => {
-    if (value !== req.body.newPassword) {
-      throw new Error('Password confirmation does not match new password');
-    }
-    return true;
-  }),
-];
-
-// Phone verification validation rules
-const verifyPhoneValidation = [
-  body('code')
-    .notEmpty()
-    .withMessage('Verification code is required')
-    .isLength({ min: 6, max: 6 })
-    .withMessage('Verification code must be 6 digits')
-    .isNumeric()
-    .withMessage('Verification code must contain only numbers'),
-];
-
-module.exports = {
-  validate,
-  registerValidation,
-  loginValidation,
-  updateProfileValidation,
-  changePasswordValidation,
-  verifyPhoneValidation
+  // Validate suggestion response
+  suggestionResponse: validate([
+    param('id')
+      .notEmpty().withMessage('Suggestion ID is required')
+      .isMongoId().withMessage('Invalid suggestion ID format'),
+    body('message')
+      .notEmpty().withMessage('Response message is required')
+      .isString().withMessage('Message must be a string')
+      .isLength({ min: 5, max: 1000 }).withMessage('Message must be between 5 and 1000 characters'),
+    body('statusUpdate')
+      .optional()
+      .isBoolean().withMessage('statusUpdate must be a boolean')
+  ])
 };
+
+module.exports = validationMiddleware;
