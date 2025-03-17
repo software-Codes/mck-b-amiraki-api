@@ -9,15 +9,14 @@ const { initializeDatabaseTables } = require("./config/database");
 const suggestionRoutes = require("./routes/suggestions/suggestionsRoutes");
 const session = require("express-session");
 const cookieParser = require("cookie-parser");
-const mediaContentRoutes  = require("./routes/churchgallery/mediaContent");
-// const socketRoutes = require("./routes/sockets/chat-routes");
-// const redis = require("redis");
-// const redisAdapter = require("socket.io-redis");
+const mediaContentRoutes = require("./routes/churchgallery/mediaContent");
+const { errorHandler } = require("./utils/global-errorHandler");
 
 const createApp = () => {
   const app = express();
   const server = http.createServer(app);
 
+  // Basic security and parsing middleware
   app.use(cookieParser());
   app.use(
     session({
@@ -32,78 +31,42 @@ const createApp = () => {
     })
   );
 
-  // Initialize the Socket.IO service
-// const socketService = new socketService(server);
-
-// Apply Redis adapter if needed for scaling
-if (process.env.USE_REDIS === 'true') {
-  const redisConfig = {
-    host: process.env.REDIS_HOST || 'localhost',
-    port: process.env.REDIS_PORT || 6379,
-    password: process.env.REDIS_PASSWORD || '',
-  };
-  
-  const pubClient = redis.createClient(redisConfig);
-  const subClient = redis.createClient(redisConfig);
-  
-  socketService.io.adapter(redisAdapter({ pubClient, subClient }));
-  
-  console.log('Socket.IO Redis adapter initialized');
-}
-
-  // Middleware setup
   const setupMiddleware = () => {
-    // CORS configuration
+    // Security middleware
     app.use(
       cors({
         origin: process.env.CORS_ORIGIN || "*",
         methods: ["GET", "POST", "PUT", "DELETE"],
         allowedHeaders: ["Content-Type", "Authorization"],
         credentials: true,
-        maxAge: 86400, // CORS preflight cache - 24 hours
+        maxAge: 86400,
       })
     );
-
-    // Security and parsing middleware
-    app.use(
-      helmet({
-        contentSecurityPolicy: process.env.NODE_ENV === "production",
-        crossOriginEmbedderPolicy: process.env.NODE_ENV === "production",
-      })
-    );
-    app.use(compression()); // Compress responses
-    app.use(express.json({ limit: "10mb" })); // Limit JSON payload size
+    app.use(helmet());
+    app.use(compression());
+    app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-    // Request logging in development
+    // Logging in development
     if (process.env.NODE_ENV === "development") {
       const morgan = require("morgan");
       app.use(morgan("dev"));
     }
   };
 
-  // Route setup
   const setupRoutes = () => {
     // API routes
-    const apiRoutes = [
-      { path: "/api/auth", router: authRoutes },
-      { path: "/api/announcements", router: announcementRoutes },
-      { path: "/api/suggestions", router: suggestionRoutes },
-      { path: "/api/media", router: mediaContentRoutes },
-      // { path: "/api/socket", router: socketRoutes },
-    ];
+    app.use("/api/auth", authRoutes);
+    app.use("/api/announcements", announcementRoutes);
+    app.use("/api/suggestions", suggestionRoutes);
+    app.use("/api/media", mediaContentRoutes);
 
-    // Register all API routes
-    apiRoutes.forEach(({ path, router }) => {
-      app.use(path, router);
-    });
-
-    // Health check endpoint
+    // Health check
     app.get("/health", (req, res) => {
       res.json({ status: "healthy", timestamp: new Date().toISOString() });
     });
 
-    // API documentation endpoint
+    // API documentation
     app.get("/api", (req, res) => {
       res.json({
         version: "1.0",
@@ -111,7 +74,7 @@ if (process.env.USE_REDIS === 'true') {
           auth: "/api/auth/*",
           announcements: "/api/announcements/*",
           suggestions: "/api/suggestions/*",
-          media: "  *",
+          media: "/api/media/*",
         },
         documentation: process.env.API_DOCS_URL || "Documentation URL not set",
       });
@@ -128,50 +91,19 @@ if (process.env.USE_REDIS === 'true') {
           "/api/suggestions/*",
           "/api/media/*",
         ],
-        suggestion: "Check the API documentation at /api for more information",
       });
     });
   };
 
-  // Global error handler
-  const setupErrorHandler = () => {
-    app.use((err, req, res, next) => {
-      // Log error details
-      console.error("Unhandled Error:", {
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        method: req.method,
-        error: err.message,
-        stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
-      });
-
-      // Send appropriate response
-      const statusCode = err.status || 500;
-      res.status(statusCode).json({
-        status: "error",
-        message:
-          process.env.NODE_ENV === "development"
-            ? err.message
-            : "Internal server error",
-        ...(process.env.NODE_ENV === "development" && {
-          stack: err.stack,
-          path: req.path,
-          method: req.method,
-        }),
-      });
-    });
-  };
-
-  // Initialize app
   const initialize = async () => {
     try {
-      await 
-      // initializeDatabaseTables();
+      // await initializeDatabaseTables();
       setupMiddleware();
       setupRoutes();
-      setupErrorHandler();
 
-      // Log successful initialization in development
+      // Add error handler AFTER other middleware and routes
+      app.use(errorHandler);
+
       if (process.env.NODE_ENV === "development") {
         console.log("Application initialized successfully");
       }
@@ -183,11 +115,7 @@ if (process.env.USE_REDIS === 'true') {
     }
   };
 
-  return {
-    app,
-    server,
-    initialize,
-  };
+  return { app, server, initialize };
 };
 
 module.exports = createApp;
