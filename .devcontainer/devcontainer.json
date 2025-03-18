@@ -1,0 +1,43 @@
+{
+  "name": "lh-infra-nodelab",
+  "dockerFile": "Dockerfile.Dev",
+  "customizations": {
+      "vscode": {
+          "settings": {
+              "terminal.integrated.defaultProfile.linux": "bash",
+              "terminal.integrated.profiles.linux": {
+                  "bash": {
+                      "path": "/bin/bash"
+                  }
+              },
+              "terminal.integrated.fontSize": 14,
+              "terminal.integrated.fontWeight": "normal"
+          },
+          "extensions": [
+              "dbaeumer.vscode-eslint",
+              "esbenp.prettier-vscode",
+              "ms-azuretools.vscode-docker",
+              "eamodio.gitlens"
+          ]
+      }
+  },
+  "postCreateCommand": "npm install",
+  "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {
+          "version": "latest",
+          "moby": true,
+          "dockerDashComposeVersion": "v2"
+      }
+  },
+  "remoteEnv": {
+      "DOCKER_HOST": "unix:///var/run/docker.sock"
+  },
+  "runArgs": [
+      "--privileged"
+  ],
+  "forwardPorts": [3000],
+  "mounts": [
+      "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+  ],
+  "remoteUser": "node"
+}
