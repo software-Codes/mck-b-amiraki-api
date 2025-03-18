@@ -66,7 +66,7 @@ const registerAdmin = async (req, res) => {
         errors: errors.array(),
       });
       return res.status(400).json({
-        success: false,  // Changed from status to success
+        success: false, // Changed from status to success
         errors: errors.array(),
       });
     }
@@ -92,8 +92,9 @@ const registerAdmin = async (req, res) => {
     );
 
     res.status(201).json({
-      success: true,  // Changed from status to success
-      message: "Admin registration initiated. Please check your email for verification code",
+      success: true, // Changed from status to success
+      message:
+        "Admin registration initiated. Please check your email for verification code",
       data: {
         id: admin.id,
         email: email,
@@ -105,7 +106,7 @@ const registerAdmin = async (req, res) => {
       error: error.message,
     });
     res.status(400).json({
-      success: false,  // Changed from status to success
+      success: false, // Changed from status to success
       message: error.message,
     });
   }
@@ -153,7 +154,8 @@ const verifyAdmin = async (req, res) => {
     });
   }
 };
-// Login user
+
+// Fixed login function to include refresh token in response
 const login = async (req, res) => {
   const logContext = `UserController.login: ${req.body.email}`;
 
@@ -170,14 +172,25 @@ const login = async (req, res) => {
     }
 
     const { email, password } = req.body;
-    const { user, token } = await userModel.loginUser(email, password);
+    const { user, accessToken, refreshToken } = await userModel.loginUser(
+      email,
+      password
+    );
 
-    // Set token in HTTP-only cookie for additional security
-    res.cookie('auth_token', token, {
+    // Set tokens in HTTP-only cookies for additional security
+    res.cookie("auth_token", accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: user.role === UserRoles.ADMIN ? 12 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000 // 12h or 24h
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge:
+        user.role === UserRoles.ADMIN ? 1 * 60 * 60 * 1000 : 2 * 60 * 60 * 1000, // 1h or 2h
+    });
+
+    res.cookie("refresh_token", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
 
     logger.info(`${logContext} - Login successful`, {
@@ -188,10 +201,13 @@ const login = async (req, res) => {
     res.status(200).json({
       status: "success",
       message: "Login successful",
-      data: { 
+      data: {
         user,
-        sessionExpiry: new Date(Date.now() + (user.role === UserRoles.ADMIN ? 12 : 24) * 60 * 60 * 1000),
-        token
+        accessToken,
+        refreshToken,
+        sessionExpiry: new Date(
+          Date.now() + (user.role === UserRoles.ADMIN ? 1 : 2) * 60 * 60 * 1000
+        ),
       },
     });
   } catch (error) {
@@ -204,7 +220,6 @@ const login = async (req, res) => {
     });
   }
 };
-
 // Get user profile
 const getProfile = async (req, res) => {
   try {
@@ -408,6 +423,44 @@ const changePassword = async (req, res) => {
   }
 };
 
+// Upload profile photo
+const uploadProfilePhoto = async (req, res) => {
+  const logContext = `UserController.uploadProfilePhoto: ${req.user.id}`;
+
+  try {
+    logger.info(`${logContext} - Attempting profile photo upload`);
+
+    // Check if file exists
+    if (!req.file) {
+      return res.status(400).json({
+        status: "error",
+        message: "No file uploaded",
+      });
+    }
+
+    const user = await userModel.uploadProfilePhoto(req.user.id, req.file);
+
+    logger.info(`${logContext} - Profile photo uploaded successfully`);
+
+    res.status(200).json({
+      status: "success",
+      message: "Profile photo uploaded successfully",
+      data: {
+        profilePhoto: user.profile_photo,
+      },
+    });
+  } catch (error) {
+    logger.error(`${logContext} - Profile photo upload failed`, {
+      error: error.message,
+    });
+
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+};
+
 // Delete account (for users)
 const deleteAccount = async (req, res) => {
   const logContext = `UserController.deleteAccount: ${req.user.id}`;
@@ -421,7 +474,7 @@ const deleteAccount = async (req, res) => {
 
     res.status(200).json({
       status: "success",
-      message: "Account deleted successfully",
+      message: "Account deleted successfully. We are so sad to see you go!",
     });
   } catch (error) {
     logger.error(`${logContext} - Account deletion failed`, {
@@ -434,111 +487,62 @@ const deleteAccount = async (req, res) => {
   }
 };
 
-// Delete user (admin or self)
-const deleteUser = async (req, res) => {
-  const userIdToDelete = req.user.id;
-  const logContext = `UserController.deleteUser: ${userIdToDelete}`;
+// Refresh access token
+const refreshToken = async (req, res) => {
+  const logContext = `UserController.refreshToken`;
 
   try {
-    // Log the deletion attempt
-    logger.info(`${logContext} - User deletion attempt`, {
-      requestingUserId: req.user.id,
-      requestingUserRole: req.user.role
+    logger.info(`${logContext} - Processing token refresh request`);
+
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: "error",
+        message: "Refresh token is required",
+      });
+    }
+
+    const result = await userModel.refreshAccessToken(refreshToken);
+
+    logger.info(`${logContext} - Token refreshed successfully`, {
+      userId: result.user.id,
     });
 
-    // Delete the logged-in user without checking additional permissions
-    const deletionResult = await userModel.deleteUser(userIdToDelete);
-
-    // Log successful deletion
-    logger.info(`${logContext} - User deleted successfully`, {
-      deletedUserId: deletionResult.deletedUserId
+    // Set the new access token in HTTP-only cookie
+    res.cookie("auth_token", result.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge:
+        result.user.role === UserRoles.ADMIN
+          ? 1 * 60 * 60 * 1000
+          : 2 * 60 * 60 * 1000, // 1h or 2h
     });
 
-    // Return success response
     res.status(200).json({
       status: "success",
-      message: "User account deleted successfully",
+      message: "Access token refreshed successfully",
+      data: {
+        accessToken: result.accessToken,
+        user: result.user,
+      },
     });
   } catch (error) {
-    // Log deletion failure
-    logger.error(`${logContext} - User deletion failed`, {
+    logger.error(`${logContext} - Token refresh failed`, {
       error: error.message,
-      requestingUserId: req.user.id,
-      requestingUserRole: req.user.role
     });
 
-    res.status(400).json({
+    res.status(401).json({
       status: "error",
       message: error.message,
     });
   }
 };
 
-
-//for service-service communication in microservices
-const verifyToken = async (req, res) => {
-  const logContext = "UserController.verifyToken";
-  
-  try {
-    const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        status: "error",
-        message: "Token is required"
-      });
-    }
-
-    // Verify token and check validity
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const isTokenValid = await userModel.verifyTokenValidity(decoded.userId, decoded.iat);
-
-    if (!isTokenValid) {
-      return res.json({
-        status: "error",
-        isValid: false,
-        message: "Token has been invalidated. Re-authentication required."
-      });
-    }
-
-    // Check if user exists and has active status
-    const user = await sql`
-      SELECT id, email, role, status, is_super_admin
-      FROM users
-      WHERE id = ${decoded.userId} AND status = 'active'
-    `;
-
-    if (!user[0]) {
-      return res.json({
-        status: "error",
-        isValid: false,
-        message: "User not found or inactive"
-      });
-    }
-
-    return res.json({
-      status: "success",
-      isValid: true,
-      isAdmin: user[0].role === UserRoles.ADMIN,
-      is_super_admin: user[0].is_super_admin,
-      userId: user[0].id
-    });
-
-  } catch (error) {
-    logger.error(`${logContext} - Token verification failed`, {
-      error: error.message,
-    });
-    
-    return res.status(400).json({
-      status: "error",
-      isValid: false,
-      message: error.name === 'TokenExpiredError' ? 
-        "Token has expired. Please log in again." : 
-        "Invalid token. Please log in again."
-    });
-  }
-};
 // Logout user
+
+// Updated logout function to handle refresh token revocation
 const logout = async (req, res) => {
   const logContext = `UserController.logout: ${req.user?.id}`;
 
@@ -548,18 +552,27 @@ const logout = async (req, res) => {
       logger.warn(`${logContext} - Logout attempted without authentication`);
       return res.status(401).json({
         status: "error",
-        message: "Authentication required"
+        message: "Authentication required",
       });
     }
 
-    // Perform logout operation
-    const logoutResult = await userModel.logoutUser(req.user.id);
+    // Get refresh token from request
+    const refreshToken = req.body.refreshToken || req.cookies.refresh_token;
 
-    // Clear authentication cookie
-    res.clearCookie('auth_token', {
+    // Perform logout operation with refresh token revocation
+    const logoutResult = await userModel.logoutUser(req.user.id, refreshToken);
+
+    // Clear authentication cookies
+    res.clearCookie("auth_token", {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+    });
+
+    res.clearCookie("refresh_token", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
     });
 
     // Invalidate any active sessions in your session store if you're using one
@@ -567,7 +580,9 @@ const logout = async (req, res) => {
       await new Promise((resolve) => {
         req.session.destroy((err) => {
           if (err) {
-            logger.error(`${logContext} - Session destruction failed`, { error: err.message });
+            logger.error(`${logContext} - Session destruction failed`, {
+              error: err.message,
+            });
           }
           resolve();
         });
@@ -576,28 +591,70 @@ const logout = async (req, res) => {
 
     logger.info(`${logContext} - User logged out successfully`, {
       userId: req.user.id,
-      timestamp: logoutResult.logoutTimestamp
+      timestamp: logoutResult.logoutTimestamp,
     });
 
     res.status(200).json({
       status: "success",
       message: "Logout successful. Please log in again to continue.",
-      timestamp: logoutResult.logoutTimestamp
+      timestamp: logoutResult.logoutTimestamp,
     });
-
   } catch (error) {
     logger.error(`${logContext} - Logout failed`, {
       error: error.message,
-      userId: req.user?.id
+      userId: req.user?.id,
     });
 
     res.status(500).json({
       status: "error",
-      message: "An error occurred during logout. Please try again."
+      message: "An error occurred during logout. Please try again.",
     });
   }
 };
 
+// Revoke a specific refresh token
+const revokeToken = async (req, res) => {
+  const logContext = `UserController.revokeToken: ${req.user?.id}`;
+
+  try {
+    logger.info(`${logContext} - Attempting to revoke token`);
+
+    // Ensure user is authenticated
+    if (!req.user?.id) {
+      return res.status(401).json({
+        status: "error",
+        message: "Authentication required",
+      });
+    }
+
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        status: "error",
+        message: "Refresh token is required",
+      });
+    }
+
+    const result = await userModel.revokeRefreshToken(refreshToken);
+
+    logger.info(`${logContext} - Token revoked successfully`);
+
+    res.status(200).json({
+      status: "success",
+      message: "Token revoked successfully",
+    });
+  } catch (error) {
+    logger.error(`${logContext} - Token revocation failed`, {
+      error: error.message,
+    });
+
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+};
 module.exports = {
   register,
   registerAdmin,
@@ -610,7 +667,7 @@ module.exports = {
   updateUser,
   changePassword,
   deleteAccount,
-  deleteUser,
-  verifyToken,
-  logout
+  logout,
+  revokeToken,
+  refreshToken,
 };

@@ -47,7 +47,7 @@ BEGIN
     CREATE TYPE suggestion_urgency AS ENUM ('low', 'normal', 'high', 'critical');
   END IF;
 END $$;`,
-     // Enum creation with proper existence checks
+      // Enum creation with proper existence checks
       `DO $$ BEGIN
 IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'message_status') THEN
   CREATE TYPE message_status AS ENUM ('sent', 'delivered', 'read', 'deleted');
@@ -398,7 +398,7 @@ CREATE TABLE IF NOT EXISTS suggestions (
       `CREATE INDEX IF NOT EXISTS idx_suggestions_urgency ON suggestions(urgency_level)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_created_at ON suggestions(created_at)`,
       `CREATE INDEX IF NOT EXISTS idx_suggestions_is_archived ON suggestions(is_archived)`,
-      `CREATE INDEX IF NOT EXISTS idx_suggestions_anonymous ON suggestions(is_anonymous)`
+      `CREATE INDEX IF NOT EXISTS idx_suggestions_anonymous ON suggestions(is_anonymous)`,
     ];
 
     for (const command of indexCommands) {
@@ -408,7 +408,7 @@ CREATE TABLE IF NOT EXISTS suggestions (
   } catch (error) {
     console.error("Error creating suggestions table:", error.message);
   }
-}
+};
 const createMediaContentsTable = async () => {
   try {
     // Create the content_type enum type if it doesn't exist
@@ -478,9 +478,45 @@ const createSuggestionNotificationsTable = async () => {
 
     console.log("Suggestion notifications table created successfully");
   } catch (error) {
-    console.error("Error creating suggestion notifications table:", error.message);
+    console.error(
+      "Error creating suggestion notifications table:",
+      error.message
+    );
   }
 };
+
+const createRefreshTokensTable = async () => {
+  try {
+    await sql`
+      CREATE TABLE refresh_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id UUID NOT NULL,  -- Change from INTEGER to UUID
+        token TEXT NOT NULL UNIQUE,
+        is_revoked BOOLEAN DEFAULT false,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        revoked_at TIMESTAMP,
+        CONSTRAINT fk_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `;
+
+    // Create indexes separately after the table creation
+    await sql`
+      CREATE INDEX idx_token ON refresh_tokens (token);
+    `;
+    
+    await sql`
+      CREATE INDEX idx_user_id ON refresh_tokens (user_id);
+    `;
+
+    console.log("Refresh tokens table and indexes created successfully");
+  } catch (error) {
+    console.error("Error creating refresh tokens table:", error.message);
+  }
+};
+
+
+
 const initializeDatabaseTables = async () => {
   try {
     await createEnumTypes();
@@ -496,6 +532,7 @@ const initializeDatabaseTables = async () => {
     await createContactsTable();
     await createMessagesTable();
     await createSuggestionNotificationsTable();
+    await createRefreshTokensTable();
     console.log("Database initialization completed successfully");
   } catch (error) {
     console.error("Error initializing database:", error.message);
@@ -508,14 +545,15 @@ module.exports = {
   createUsersTable,
   createAnnouncementsTable,
   createPaymentsTable,
-  createNotificationsTable,
-  createPaymentSummariesTable,
-  createStatementsTable,
+  // createNotificationsTable,
+  // createPaymentSummariesTable,
+  // createStatementsTable,
   createViews,
   createEnumTypes,
   createSuggestionsTable,
   createMediaContentsTable,
-  createContactsTable,
+  // createContactsTable,
   createSuggestionNotificationsTable,
   createMessagesTable,
+  createRefreshTokensTable,
 };

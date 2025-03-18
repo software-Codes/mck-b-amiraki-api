@@ -2,6 +2,7 @@ const { sql } = require("../config/database");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const emailService = require("../services/nodemailer");
+
 //generate 6-code verification code
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -390,56 +391,62 @@ const revokeRefreshToken = async (refreshToken) => {
 };
 
 // Get all users (admin only, with enhanced filtering and pagination)
+//Modified getAllUsers function
 const getAllUsers = async (filters = {}, page = 1, limit = 10) => {
   const offset = (page - 1) * limit;
   let whereClause = "WHERE 1=1";
-  const values = [];
+  const params = [];
 
-  // Build dynamic where clause based on filters
+  // Build dynamic where clause
   if (filters.role) {
-    whereClause += ` AND role = $${values.length + 1}`;
-    values.push(filters.role);
+    params.push(filters.role);
+    whereClause += ` AND role = $${params.length}`;
   }
 
   if (filters.status) {
-    whereClause += ` AND status = $${values.length + 1}`;
-    values.push(filters.status);
+    params.push(filters.status);
+    whereClause += ` AND status = $${params.length}`;
   }
 
   if (filters.search) {
-    whereClause += ` AND (full_name ILIKE $${
-      values.length + 1
-    } OR email ILIKE $${values.length + 1})`;
-    values.push(`%${filters.search}%`);
+    params.push(`%${filters.search}%`);
+    whereClause += ` AND (full_name ILIKE $${params.length} OR email ILIKE $${params.length})`;
   }
 
-  const query = `
-    SELECT 
-      id, full_name, email, phone_number, role, status, 
-      created_at, updated_at, last_login
-    FROM users
-    ${whereClause}
-    ORDER BY created_at DESC
-    LIMIT $${values.length + 1}
-    OFFSET $${values.length + 2};
-  `;
+  // Add pagination parameters
+  params.push(limit, offset);
 
-  values.push(limit, offset);
+  try {
+    // Execute main query
+    const query = `
+      SELECT 
+        id, full_name, email, phone_number, role, status, 
+        created_at, updated_at, last_login
+      FROM users
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $${params.length - 1}
+      OFFSET $${params.length}
+    `;
+    
+    const users = await sql(query, params);
 
-  const users = await sql.query(query, values);
-  const totalUsers = await sql.query(
-    `SELECT COUNT(*) FROM users ${whereClause}`,
-    values.slice(0, -2)
-  );
+    // Execute count query (remove limit/offset params)
+    const countParams = params.slice(0, -2);
+    const totalQuery = `SELECT COUNT(*) FROM users ${whereClause}`;
+    const totalUsers = await sql(totalQuery, countParams);
 
-  return {
-    users: users.rows,
-    total: parseInt(totalUsers.rows[0].count),
-    page,
-    totalPages: Math.ceil(totalUsers.rows[0].count / limit),
-  };
+    return {
+      users,
+      total: parseInt(totalUsers[0].count),
+      page,
+      totalPages: Math.ceil(totalUsers[0].count / limit),
+    };
+  } catch (error) {
+    console.error('Database error:', error);
+    throw new Error('Failed to fetch users');
+  }
 };
-
 // Update the updateUser function to handle profile photo
 
 const updateUser = async (userId, updates, requestingUserRole) => {
@@ -658,5 +665,5 @@ module.exports = {
   verifyTokenValidity,
   refreshAccessToken,
   revokeRefreshToken,
-  
+
 };

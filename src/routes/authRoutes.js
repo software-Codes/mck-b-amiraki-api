@@ -1,13 +1,12 @@
 const express = require("express");
 const router = express.Router();
-const userController = require("../controllers/authController");
-const {authenticate } = require("../middleware/authenticate");
+const userController = require("../controllers/authController"); // Changed from authController to match your controller
 const {
   authMiddleware,
   requireAdmin,
   requireActive,
   requireSuperAdmin,
-  serviceAuthMiddleware,
+  sensitiveOperationsMiddleware,
 } = require("../middleware/authMiddleware");
 const { check } = require("express-validator");
 const multer = require("multer");
@@ -28,6 +27,20 @@ const upload = multer({
 });
 
 // Input validation middleware
+const registerValidation = [
+  check("fullName").trim().notEmpty().withMessage("Full name is required"),
+  check("email").isEmail().withMessage("Valid email is required"),
+  check("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters long"),
+  check("phoneNumber").notEmpty().withMessage("Phone number is required"),
+];
+
+const loginValidation = [
+  check("email").isEmail().withMessage("Valid email is required"),
+  check("password").notEmpty().withMessage("Password is required"),
+];
+
 const adminRegisterValidation = [
   check("fullName").trim().notEmpty().withMessage("Full name is required"),
   check("email").isEmail().withMessage("Valid email is required"),
@@ -58,15 +71,26 @@ const updateProfileValidation = [
     .withMessage("Phone number cannot be empty if provided"),
 ];
 
+const changePasswordValidation = [
+  check("currentPassword")
+    .notEmpty()
+    .withMessage("Current password is required"),
+  check("newPassword")
+    .isLength({ min: 8 })
+    .withMessage("New password must be at least 8 characters long"),
+];
+
 // Public routes
 router.post(
   "/register",
+  registerValidation,
   upload.single("profilePhoto"),
   userController.register
 );
-router.post("/login", userController.login);
-//handle logout
-router.post("/logout", authMiddleware, requireActive, userController.logout);
+
+router.post("/login", loginValidation, userController.login);
+
+router.post("/refresh-token", userController.refreshToken);
 
 // Admin registration routes
 router.post(
@@ -74,22 +98,19 @@ router.post(
   adminRegisterValidation,
   userController.registerAdmin
 );
-  
+
 router.post(
   "/verify-admin",
   adminVerificationValidation,
   userController.verifyAdmin
 );
 
-//reset password
-router.put("/change-password", userController.changePassword);
-
-
 // All protected routes below this middleware
 router.use(authMiddleware, requireActive);
 
 // Regular user routes
 router.get("/profile", userController.getProfile);
+
 router.put(
   "/profile",
   updateProfileValidation,
@@ -97,17 +118,35 @@ router.put(
   userController.updateProfile
 );
 
+// router.post(
+//   "/upload-profile-photo",
+//   upload.single("profilePhoto"),
+//   userController.uploadProfilePhoto
+// );
+
+router.put(
+  "/change-password",
+  changePasswordValidation,
+  sensitiveOperationsMiddleware,
+  userController.changePassword
+);
+
 // Self-account deletion route
-router.delete("/account", userController.deleteUser);
+router.delete(
+  "/account",
+  sensitiveOperationsMiddleware,
+  userController.deleteAccount
+);
+
+// Token management
+router.post("/logout", userController.logout);
+router.post("/revoke-token", userController.revokeToken);
 
 // Admin routes
 router.get("/users", requireAdmin, userController.getAllUsers);
 router.get("/users/:userId", requireAdmin, userController.getUser);
 router.put("/users/:userId", requireAdmin, userController.updateUser);
 
-// Updated delete user route to support both admin and self-deletion
-router.delete("/users/:userId", userController.deleteUser);
-//
 // Super admin only routes
 router.post(
   "/create-admin",
@@ -132,8 +171,5 @@ router.use((error, req, res, next) => {
   }
   next();
 });
-
-// Handling service-to-service communication
-router.post("/verify-token", serviceAuthMiddleware, userController.verifyToken);
 
 module.exports = router;
