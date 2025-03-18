@@ -186,7 +186,7 @@ const verifyAdminAccount = async (email, verificationCode) => {
   }
 };
 
-// Enhanced login with role-based token generation
+// Enhanced login with role-based token generation and genereate the refresh token
 const loginUser = async (email, password) => {
   try {
     const user = await sql`
@@ -214,26 +214,64 @@ const loginUser = async (email, password) => {
     `;
 
     const issuedAt = Math.floor(Date.now() / 1000);
-    
-    // Generate role-based token with issued timestamp
-    const token = jwt.sign(
+
+    // Generate access token
+    const accessToken = jwt.sign(
       {
         userId: user[0].id,
         email: user[0].email,
         role: user[0].role,
-        iat: issuedAt
+        iat: issuedAt,
       },
       process.env.JWT_SECRET,
-      { expiresIn: user[0].role === UserRoles.ADMIN ? "12h" : "24h" }
+      { expiresIn: user[0].role === UserRoles.ADMIN ? "1h" : "2h" } // Shorter lifetime for access tokens
     );
+
+    // Generate refresh token
+    const refreshToken = await generateRefreshToken(user[0].id);
 
     const { password: _, ...userWithoutPassword } = user[0];
     return {
       user: userWithoutPassword,
-      token,
+      accessToken,
+      refreshToken,
     };
   } catch (error) {
     throw error;
+  }
+};
+
+//Refresh token function to facilitate user does not keep logging in after closing the mobile application
+const generateRefreshToken = async (userId) => {
+  try {
+    //generate a random token
+    const refreshToken = jwt.sign(
+      { userId, type: "refresh" },
+      process.env.REFRESH_TOKEN_SECRET,
+      { expiresIn: "30d" } //needs to last more than 30 days
+    );
+    // Store refresh token in database with expiry
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 30); // 30 days from now
+
+    await sql`
+     INSERT INTO refresh_tokens
+     (
+     user_id,
+     token,
+     expires_at,
+     created_at
+     )
+     VALUES(
+     ${userId},
+      ${refreshToken},
+      ${expiryDate},
+      NOW()
+     )
+     `;
+    return refreshToken;
+  } catch (error) {
+    throw new Error(`Failed to generate a refresh token: ${error.message}`);
   }
 };
 // Get user by ID (with role check)
@@ -254,6 +292,101 @@ const getUserById = async (userId, requestingUserRole) => {
   }
 
   return user[0];
+};
+
+// Refresh token function to get new access token
+const refreshAccessToken = async (refreshToken) => {
+  try {
+    // Verify refresh token
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    } catch (err) {
+      throw new Error('Invalid refresh token');
+    }
+
+    // Check if token exists in database and is not expired or revoked
+    const storedToken = await sql`
+      SELECT 
+        id, 
+        user_id, 
+        is_revoked, 
+        expires_at 
+      FROM refresh_tokens 
+      WHERE token = ${refreshToken}
+    `;
+
+    if (!storedToken[0]) {
+      throw new Error('Refresh token not found');
+    }
+
+    if (storedToken[0].is_revoked) {
+      throw new Error('Refresh token has been revoked');
+    }
+
+    if (new Date() > new Date(storedToken[0].expires_at)) {
+      throw new Error('Refresh token has expired');
+    }
+
+    // Get user info
+    const user = await sql`
+      SELECT id, email, role FROM users WHERE id = ${storedToken[0].user_id} AND status = 'active'
+    `;
+
+    if (!user[0]) {
+      throw new Error('User not found or inactive');
+    }
+
+    const issuedAt = Math.floor(Date.now() / 1000);
+
+    // Generate new access token
+    const accessToken = jwt.sign(
+      {
+        userId: user[0].id,
+        email: user[0].email,
+        role: user[0].role,
+        iat: issuedAt
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: user[0].role === UserRoles.ADMIN ? "1h" : "2h" }
+    );
+
+    return {
+      accessToken,
+      user: {
+        id: user[0].id,
+        email: user[0].email,
+        role: user[0].role
+      }
+    };
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Revoke refresh token (used during logout)
+const revokeRefreshToken = async (refreshToken) => {
+  try {
+    const result = await sql`
+      UPDATE refresh_tokens
+      SET 
+        is_revoked = true,
+        revoked_at = NOW()
+      WHERE token = ${refreshToken}
+      RETURNING id
+    `;
+
+    if (!result[0]) {
+      throw new Error('Refresh token not found');
+    }
+
+    return {
+      success: true,
+      message: 'Refresh token revoked successfully'
+    };
+  } catch (error) {
+    throw error;
+  }
 };
 
 // Get all users (admin only, with enhanced filtering and pagination)
@@ -429,7 +562,8 @@ const deleteUser = async (userId) => {
   }
 };
 // Logout user and manage token invalidation
-const logoutUser = async (userId) => {
+// Update logoutUser to also revoke refresh tokens
+const logoutUser = async (userId, refreshToken) => {
   try {
     // First, verify the user exists
     const user = await sql`
@@ -451,6 +585,20 @@ const logoutUser = async (userId) => {
         token_invalidated_at = ${tokenInvalidationTimestamp}
       WHERE id = ${userId}
       RETURNING id, last_logout, token_invalidated_at;
+    `;
+
+    // If refresh token was provided, revoke it
+    if (refreshToken) {
+      await revokeRefreshToken(refreshToken);
+    }
+
+    // Optionally, revoke all user's refresh tokens for complete logout across all devices
+    await sql`
+      UPDATE refresh_tokens
+      SET 
+        is_revoked = true,
+        revoked_at = NOW()
+      WHERE user_id = ${userId} AND is_revoked = false
     `;
 
     if (!result || result.length === 0) {
@@ -507,5 +655,8 @@ module.exports = {
   updatePassword,
   deleteUser,
   logoutUser,
-  verifyTokenValidity
+  verifyTokenValidity,
+  refreshAccessToken,
+  revokeRefreshToken,
+  
 };

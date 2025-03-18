@@ -74,7 +74,7 @@ router.post(
   adminRegisterValidation,
   userController.registerAdmin
 );
-
+  
 router.post(
   "/verify-admin",
   adminVerificationValidation,
