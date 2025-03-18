@@ -100,6 +100,48 @@ setup_azure_context() {
     fi
 }
 
+# Create or get service principal for GitHub integration
+setup_service_principal() {
+    local sp_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-github-sp"
+    
+    log_info "Setting up service principal for GitHub integration: $sp_name"
+    
+    # Create a new service principal with Contributor role
+    log_info "Creating service principal: $sp_name"
+    
+    # Create or update the service principal and assign Contributor role
+    local sp_output
+    sp_output=$(az ad sp create-for-rbac \
+        --name "$sp_name" \
+        --role "Contributor" \
+        --scopes "/subscriptions/${PROJECT_SUBSCRIPTION_ID}/resourceGroups/${PROJECT_RESOURCE_GROUP}" \
+        --sdk-auth \
+        -o json)
+    
+    if [ -z "$sp_output" ]; then
+        log_error "Failed to create service principal"
+        exit 1
+    fi
+    
+    # Extract the client ID (app ID) from the service principal output
+    CLIENT_ID=$(echo "$sp_output" | jq -r '.clientId')
+    
+    if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" == "null" ]; then
+        log_error "Failed to extract client ID from service principal"
+        exit 1
+    fi
+    
+    log_success "Service principal created/updated successfully: $CLIENT_ID"
+    
+    # Export service principal details for later use
+    export AZURE_CREDENTIALS="$sp_output"
+    export SERVICE_PRINCIPAL_ID="$CLIENT_ID"
+    
+    # Wait a moment for AAD propagation
+    log_info "Waiting for AAD propagation (30 seconds)..."
+    sleep 30
+}
+
 # Prepare Azure Container Registry
 prepare_container_registry() {
     local registry_name="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry"
@@ -107,7 +149,7 @@ prepare_container_registry() {
     log_info "Checking Azure Container Registry: $registry_name"
     
     # Check if registry exists, create if not
-    if ! az acr show --name "$registry_name" &>/dev/null; then
+    if ! az acr show --name "$registry_name" --resource-group "$PROJECT_RESOURCE_GROUP" &>/dev/null; then
         log_warning "Container Registry does not exist. Creating..."
         az acr create \
             --name "$registry_name" \
@@ -118,6 +160,15 @@ prepare_container_registry() {
 
     # Login to ACR
     az acr login --name "$registry_name"
+    
+    # Grant service principal ACR pull rights
+    if [ -n "${SERVICE_PRINCIPAL_ID:-}" ]; then
+        log_info "Granting ACR pull rights to service principal"
+        az role assignment create \
+            --assignee "$SERVICE_PRINCIPAL_ID" \
+            --scope "/subscriptions/${PROJECT_SUBSCRIPTION_ID}/resourceGroups/${PROJECT_RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/${registry_name}" \
+            --role "AcrPull" || log_warning "Could not assign AcrPull role, may already exist"
+    fi
 }
 
 # Prepare Container Apps Environment
@@ -147,26 +198,51 @@ prepare_container_apps_environment() {
 deploy_container_app() {
     local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv"
     local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
-    local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
+    local registry_name="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry"
+    local registry_url="${registry_name}.azurecr.io"
     local repo_url="https://github.com/mckBishopAmirakiChurch-App/backendclone"
-
     local branch="main"
 
     log_info "Deploying Container App: $container_app_name"
-
-    # Deploy container app
- # Deploy container app
-    az containerapp up \
-        --name "$container_app_name" \
-        --resource-group "$PROJECT_RESOURCE_GROUP" \
-        --environment "$environment_name" \
-        --repo "$repo_url" \
-        --branch "$branch" \
-        --registry-server "$registry_url" \
-        --ingress external \
-        --target-port 3000 \
-
-
+    
+    # Get ACR credentials
+    local acr_username
+    local acr_password
+    acr_username=$(az acr credential show --name "$registry_name" --query "username" -o tsv)
+    acr_password=$(az acr credential show --name "$registry_name" --query "passwords[0].value" -o tsv)
+    
+    # Set up GitHub credentials
+    if [ -n "${SERVICE_PRINCIPAL_ID:-}" ]; then
+        log_info "Using service principal for GitHub integration"
+        
+        # Create or update the container app with GitHub integration
+        az containerapp up \
+            --name "$container_app_name" \
+            --resource-group "$PROJECT_RESOURCE_GROUP" \
+            --environment "$environment_name" \
+            --repo "$repo_url" \
+            --branch "$branch" \
+            --registry-server "$registry_url" \
+            --registry-username "$acr_username" \
+            --registry-password "$acr_password" \
+            --service-principal-client-id "$SERVICE_PRINCIPAL_ID" \
+            --ingress external \
+            --target-port 3000
+    else
+        # Fallback if service principal setup failed
+        log_warning "Service principal not available, using standard deployment"
+        az containerapp up \
+            --name "$container_app_name" \
+            --resource-group "$PROJECT_RESOURCE_GROUP" \
+            --environment "$environment_name" \
+            --repo "$repo_url" \
+            --branch "$branch" \
+            --registry-server "$registry_url" \
+            --registry-username "$acr_username" \
+            --registry-password "$acr_password" \
+            --ingress external \
+            --target-port 3000
+    fi
 
     # Update container app settings
     log_info "Configuring Container App scaling and resources"
@@ -177,11 +253,6 @@ deploy_container_app() {
         --memory 0.5Gi \
         --min-replicas 1 \
         --max-replicas 10
-
-    # Optional: Disable public ingress if internal service
-    # az containerapp ingress disable \
-    #     --name "$container_app_name" \
-    #     --resource-group "$PROJECT_RESOURCE_GROUP"
 }
 
 # Main deployment workflow
@@ -202,6 +273,7 @@ main() {
 
     # Azure deployment steps
     setup_azure_context
+    setup_service_principal  # Create service principal first
     prepare_container_registry
     prepare_container_apps_environment
     deploy_container_app
