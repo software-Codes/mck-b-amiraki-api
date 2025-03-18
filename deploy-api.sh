@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Enhanced Deployment Script for Azure Container Apps with Robust Error Handling and Logging
+# Enhanced Deployment Script for Azure Container Apps with Robust Error Handling, Logging, and Load Balancing
 
 # Strict mode for better error handling
 set -euo pipefail
@@ -143,19 +143,38 @@ prepare_container_apps_environment() {
     echo "Registry URL: $registry_url"
 }
 
+# Configure load balancing for the container app
+configure_load_balancing() {
+    local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
+    
+    log_info "Configuring load balancing for Container App: $container_app_name"
+    
+    # Update the container app with load balancing settings via ingress configuration
+    az containerapp ingress update \
+        --name "$container_app_name" \
+        --resource-group "$PROJECT_RESOURCE_GROUP" \
+        --target-port 3000 \
+        --external \
+        --ingress-traffic-weight "${container_app_name}=100" \
+        --transport auto \
+        --allow-insecure false \
+        --sticky-sessions cookie \
+        --enable-session-affinity true
+
+    log_success "Load balancing configuration applied successfully"
+}
+
 # Build and deploy container
 deploy_container_app() {
     local environment_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-BackendContainerAppsEnv"
     local container_app_name="${ENVIRONMENT_PREFIX}-${PROJECT_PREFIX}-worker"
     local registry_url="${ENVIRONMENT_PREFIX}${PROJECT_PREFIX}contregistry.azurecr.io"
-    local repo_url="https://github.com/CollinsMunene-Developer/amiraki-development"
-
+    local repo_url="https://github.com/mckBishopAmirakiChurch-App/backendclone"
     local branch="main"
 
     log_info "Deploying Container App: $container_app_name"
 
     # Deploy container app
- # Deploy container app
     az containerapp up \
         --name "$container_app_name" \
         --resource-group "$PROJECT_RESOURCE_GROUP" \
@@ -164,25 +183,23 @@ deploy_container_app() {
         --branch "$branch" \
         --registry-server "$registry_url" \
         --ingress external \
-        --target-port 3000 \
- 
+        --target-port 3000
 
-
-
-    # Update container app settings
-    log_info "Configuring Container App scaling and resources"
+    # Update container app settings for scale and load handling
+    log_info "Configuring Container App scaling and resources for load balancing"
     az containerapp update \
         --name "$container_app_name" \
         --resource-group "$PROJECT_RESOURCE_GROUP" \
         --cpu 0.25 \
         --memory 0.5Gi \
-        --min-replicas 1 \
-        --max-replicas 10
+        --min-replicas 2 \  # Increased minimum replicas for high availability
+        --max-replicas 10 \
+        --scale-rule-name "http-scale-rule" \
+        --scale-rule-http-concurrency 50 \  # Scale based on concurrent requests
+        --scale-rule-type http
 
-    # Optional: Disable public ingress if internal service
-    # az containerapp ingress disable \
-    #     --name "$container_app_name" \
-    #     --resource-group "$PROJECT_RESOURCE_GROUP"
+    # Apply load balancing configuration
+    configure_load_balancing
 }
 
 # Main deployment workflow
@@ -199,7 +216,7 @@ main() {
     # Redirect output to log file and console
     exec > >(tee -a "$log_file") 2>&1
 
-    log_info "Starting Container App Deployment Workflow"
+    log_info "Starting Container App Deployment Workflow with Load Balancing"
 
     # Azure deployment steps
     setup_azure_context
@@ -207,7 +224,7 @@ main() {
     prepare_container_apps_environment
     deploy_container_app
 
-    log_success "Deployment completed successfully"
+    log_success "Deployment with load balancing completed successfully"
     log_info "Detailed logs available at: $log_file"
 }
 
