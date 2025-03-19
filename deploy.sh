@@ -10,7 +10,7 @@ fi
 export $(grep -v '^#' .env | xargs -d '\n')
 
 # Set variables
-APP_NAME="nodebackend"
+APP_NAME="apiinfrahdev"
 RESOURCE_GROUP="DevOps"
 ENV_NAME="nodebackend-env"
 LOCATION="South Africa North"  # Update with your desired Azure region
