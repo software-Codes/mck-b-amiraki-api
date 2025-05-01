@@ -187,60 +187,60 @@ const verifyAdminAccount = async (email, verificationCode) => {
   }
 };
 
-// Enhanced login with role-based token generation and genereate the refresh token
-const loginUser = async (email, password) => {
-  try {
-    const user = await sql`
-      SELECT id, full_name, email, password, role, status, last_login
-      FROM users
-      WHERE email = ${email} AND status = 'active';
-    `;
+  // Enhanced login with role-based token generation and genereate the refresh token
+  const loginUser = async (email, password) => {
+    try {
+      const user = await sql`
+        SELECT id, full_name, email, password, role, status, last_login
+        FROM users
+        WHERE email = ${email} AND status = 'active';
+      `;
 
-    if (!user[0]) {
-      throw new Error("Invalid email or password");
+      if (!user[0]) {
+        throw new Error("Invalid email or password");
+      }
+
+      const isValidPassword = await bcrypt.compare(password, user[0].password);
+      if (!isValidPassword) {
+        throw new Error("Invalid email or password");
+      }
+
+      // Clear any previous token invalidation timestamp
+      await sql`
+        UPDATE users
+        SET 
+          last_login = NOW(),
+          token_invalidated_at = null
+        WHERE id = ${user[0].id};
+      `;
+
+      const issuedAt = Math.floor(Date.now() / 1000);
+
+      // Generate access token
+      const accessToken = jwt.sign(
+        {
+          userId: user[0].id,
+          email: user[0].email,
+          role: user[0].role,
+          iat: issuedAt,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: user[0].role === UserRoles.ADMIN ? "1h" : "2h" } // Shorter lifetime for access tokens
+      );
+
+      // Generate refresh token
+      const refreshToken = await generateRefreshToken(user[0].id);
+
+      const { password: _, ...userWithoutPassword } = user[0];
+      return {
+        user: userWithoutPassword,
+        accessToken,
+        refreshToken,
+      };
+    } catch (error) {
+      throw error;
     }
-
-    const isValidPassword = await bcrypt.compare(password, user[0].password);
-    if (!isValidPassword) {
-      throw new Error("Invalid email or password");
-    }
-
-    // Clear any previous token invalidation timestamp
-    await sql`
-      UPDATE users
-      SET 
-        last_login = NOW(),
-        token_invalidated_at = null
-      WHERE id = ${user[0].id};
-    `;
-
-    const issuedAt = Math.floor(Date.now() / 1000);
-
-    // Generate access token
-    const accessToken = jwt.sign(
-      {
-        userId: user[0].id,
-        email: user[0].email,
-        role: user[0].role,
-        iat: issuedAt,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: user[0].role === UserRoles.ADMIN ? "1h" : "2h" } // Shorter lifetime for access tokens
-    );
-
-    // Generate refresh token
-    const refreshToken = await generateRefreshToken(user[0].id);
-
-    const { password: _, ...userWithoutPassword } = user[0];
-    return {
-      user: userWithoutPassword,
-      accessToken,
-      refreshToken,
-    };
-  } catch (error) {
-    throw error;
-  }
-};
+  };
 
 //Refresh token function to facilitate user does not keep logging in after closing the mobile application
 const generateRefreshToken = async (userId) => {

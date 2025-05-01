@@ -11,9 +11,9 @@ export $(grep -v '^#' .env | xargs -d '\n')
 
 # Set variables
 APP_NAME="apiinfrahdev"
-RESOURCE_GROUP="DevOps"
-ENV_NAME="nodebackend-env"
-LOCATION="South Africa North"  # Update with your desired Azure region
+RESOURCE_GROUP="Devops"
+ENV_NAME="apiinfrahtest"
+LOCATION="North Europe"  # Update with your desired Azure region
 
 # Convert .env file to --env-vars arguments
 ENV_VARS=$(grep -v '^#' .env | awk -F= '{print "--env-vars", $1"="$2}' | tr '\n' ' ')
